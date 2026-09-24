@@ -285,3 +285,38 @@ test('公募が必要な年度：R5.11採用もR5.4採用もR8.4に公募（毎�
     assert.ok(r8.reasons.some((x) => /R8\.4\.1に公募が必要/.test(x)));
   }
 });
+
+test('年休の付与日数（市マニュアル第Ⅴ章1）と3年周期の1年目の扱い', () => {
+  const d = baseData();
+  const s = d.settings;
+  const full = (over) => appt({ type: 'full', payType: 'monthly', weeklyHours: 38.75, ...over });
+  // 3年周期の1年目（10082の例）：年休10日、共済(短期)・雇用保険
+  const y1 = full({ id: 'y1', yearInService: 1, annualLeave: 20, socialIns: '共済', empIns: '退手' });
+  assert.strictEqual(C.annualLeaveDays(d, y1, s), 10);
+  const msgs = C.validateAppointment(y1, d, s).map((i) => i.msg).join('\n');
+  assert.match(msgs, /年休は10日と判定/);
+  assert.match(msgs, /社会保険は「共済\(短期\)」/);
+  assert.match(msgs, /雇用保険／退職手当は「雇用保険」/);
+  assert.strictEqual(C.annualLeaveDays(d, full({ id: 'y2', yearInService: 2 }), s), 11);
+  assert.strictEqual(C.annualLeaveDays(d, full({ id: 'y3', yearInService: 3 }), s), 12);
+  // 時間額パート：週3日なら5日、勤務日数が不明なら判定不可、任期6月未満は対象外
+  const hourly = appt({ id: 'h', type: 'part', payType: 'hourly', weeklyHours: '', yearInService: 1 });
+  assert.strictEqual(C.annualLeaveDays(d, hourly, s), null);
+  assert.strictEqual(C.annualLeaveDays(d, { ...hourly, weeklyDays: 3 }, s), 5);
+  assert.strictEqual(C.annualLeaveDays(d, { ...hourly, annualWorkDays: 130 }, s), 5);
+  assert.strictEqual(C.annualLeaveDays(d, { ...hourly, weeklyDays: 3, end: '2026-08-31' }, s), 0);
+});
+
+test('公募をまたぐフルタイムの継続：既定は公募で数え直す（設定で通算も可）', () => {
+  const d = baseData();
+  const prev = appt({ id: 'p', type: 'full', weeklyHours: 38.75, fiscalYear: 2025, start: '2025-04-01', end: '2026-03-31', recruitMethod: 'reappoint', yearInService: 3 });
+  const now = appt({ id: 'n', type: 'full', weeklyHours: 38.75, recruitMethod: 'public', yearInService: 1 });
+  d.appointments.push(prev, now);
+  assert.strictEqual(C.suggestSocialIns(d, now, d.settings).value, '共済(短期)');
+  assert.strictEqual(C.suggestEmpIns(d, now, d.settings).value, '雇用保険');
+  assert.strictEqual(C.annualLeaveDays(d, now, d.settings), 10);
+  const cont = { ...d.settings, continuityResetOnPublic: false };
+  assert.strictEqual(C.suggestSocialIns(d, now, cont).value, '共済');
+  assert.strictEqual(C.suggestEmpIns(d, now, cont).value, '退手');
+  assert.strictEqual(C.annualLeaveDays(d, now, cont), 11);
+});

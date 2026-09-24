@@ -49,6 +49,8 @@
     kyosaiMonths: 12,
     // 健康診断・ストレスチェック（市マニュアル第Ⅶ章4：任用1年かつ週29時間以上）
     healthCheckHours: 29,
+    // 継続勤務（年休の継続勤務年数、フルの退手・共済の切替）を公募でリセットする（3年周期の1年目から数え直す）
+    continuityResetOnPublic: true,
     // 任期満了の何日前から一覧に警告表示するか
     expiryAlertDays: 60,
     // 評価段階（上位から）
@@ -261,12 +263,14 @@
    * 同じ職員のフルタイムの任用を、切れ目なく（前の任期の翌日に開始）さかのぼる。
    * 任用一覧の「何年目」がシステム内の履歴より長い場合は、その年数分4月1日にさかのぼって推定する。
    */
-  function fullTimeServiceStart(data, appt) {
+  function fullTimeServiceStart(data, appt, settings) {
     if (appt.type !== 'full' || !parseISO(appt.start)) return null;
+    const reset = !settings || settings.continuityResetOnPublic !== false;
     const list = appointmentsOfStaff(data, appt.staffId).filter((a) => a.status !== 'canceled' && a.type === 'full' && a.id !== appt.id);
     let cur = appt;
     let years = 1;
     for (;;) {
+      if (reset && cur.recruitMethod === 'public') break;
       const prevEnd = addDaysISO(cur.start, -1);
       const prev = list.find((a) => a.end === prevEnd);
       if (!prev) break;
@@ -281,7 +285,7 @@
   }
   /** フルタイムの雇用保険→退職手当、健保（共済短期）→共済組合の切替時期（市マニュアル第Ⅶ章1・2） */
   function fullTimeSwitchDates(data, appt, settings) {
-    const ss = fullTimeServiceStart(data, appt);
+    const ss = fullTimeServiceStart(data, appt, settings);
     if (!ss) return null;
     return {
       serviceStart: ss.date,
@@ -312,6 +316,63 @@
     if (h == null) return null;
     const days = parseISO(appt.start) && parseISO(appt.end) ? diffDays(appt.start, appt.end) + 1 : 0;
     return { value: h >= Number(settings.empInsHours) && days >= 31 ? '雇用保険' : '無', sure: true };
+  }
+  /**
+   * 継続勤務年数（年休の表の行）。
+   * 公募でリセットする設定（既定）では、3年周期の年目−1（1年目＝任用の日、2年目＝1年、3年目＝2年）。
+   * 通算する設定では、切れ目なく続く会計年度任用職員としての任用の年度数−1。
+   */
+  function continuousServiceYears(data, appt, settings) {
+    const y = yearInServiceOf(data, appt);
+    if (settings.continuityResetOnPublic !== false) return y - 1;
+    const list = appointmentsOfStaff(data, appt.staffId).filter((a) => a.status !== 'canceled' && a.id !== appt.id);
+    let cur = appt;
+    let fys = 1;
+    for (;;) {
+      const prev = list.find((a) => a.end === addDaysISO(cur.start, -1));
+      if (!prev) break;
+      if (fiscalYearOf(prev.start) !== fiscalYearOf(cur.start)) fys += 1;
+      cur = prev;
+    }
+    return Math.max(fys, y) - 1;
+  }
+  // 年次休暇の日数表（市マニュアル第Ⅴ章1）。行：継続勤務年数0〜6以上、列：週5日以上・4日・3日・2日・1日
+  const ANNUAL_LEAVE_TABLE = [
+    [10, 7, 5, 3, 1],
+    [11, 8, 6, 4, 2],
+    [12, 9, 6, 4, 2],
+    [14, 10, 8, 5, 2],
+    [16, 12, 9, 6, 3],
+    [18, 13, 10, 6, 3],
+    [20, 15, 11, 7, 3],
+  ];
+  /** 年休の表の列（週の勤務日数、なければ任用期間の勤務日数から）。判定できなければ null、対象外は -1 */
+  function annualLeaveColumn(appt) {
+    const wd = Number(appt.weeklyDays) || (appt.type === 'full' || appt.payType === 'monthly' ? 5 : 0);
+    if (wd) return wd >= 5 ? 0 : 5 - Math.floor(wd);
+    const ad = Number(appt.annualWorkDays);
+    if (!ad) return null;
+    if (ad >= 217) return 0;
+    if (ad >= 169) return 1;
+    if (ad >= 121) return 2;
+    if (ad >= 73) return 3;
+    if (ad >= 48) return 4;
+    return -1;
+  }
+  /**
+   * 年次休暇の付与日数（市マニュアル第Ⅴ章1）。
+   * 6月以上の任期が定められている職員が対象（対象外は 0）。前年度からの繰越分は含まない。
+   * 週の勤務日数：フル・月額パートは5日、日額・時間額パートは入力値（または任用期間の勤務日数）。
+   */
+  function annualLeaveDays(data, appt, settings) {
+    const m = termMonths(appt);
+    if (m == null) return null;
+    if (m < 6) return 0;
+    const col = annualLeaveColumn(appt);
+    if (col == null) return null;
+    if (col < 0) return 0;
+    const years = Math.min(Math.max(continuousServiceYears(data, appt, settings), 0), 6);
+    return ANNUAL_LEAVE_TABLE[years][col];
   }
   /** 健康診断・ストレスチェックの対象（市マニュアル第Ⅶ章4） */
   function healthCheckRequired(appt, settings) {
@@ -395,6 +456,12 @@
       const sug = suggestEmpIns(data, appt, settings);
       if (sug && sug.value !== normInsText(appt.empIns)) {
         warn(`雇用保険／退職手当は「${sug.value}」と判定されます（入力：${appt.empIns}）。`, MAN('第Ⅶ章2'));
+      }
+    }
+    if (appt.annualLeave !== '' && appt.annualLeave != null && appt.staffId) {
+      const days = annualLeaveDays(data, appt, settings);
+      if (days != null && days !== Number(appt.annualLeave)) {
+        warn(`年休は${days}日と判定されます（入力：${appt.annualLeave}日。前年度からの繰越分は含めません）。`, MAN('第Ⅴ章1'));
       }
     }
     if (/保育士/.test(appt.title || '') && normInsText(appt.hoikushiCheck) !== '済') {
@@ -532,6 +599,10 @@
       };
       delete draft.createdAt;
       delete draft.examId;
+      if (draft.annualLeave !== '' && draft.annualLeave != null) {
+        const days = annualLeaveDays({ ...data, appointments: data.appointments.concat([draft]) }, draft, settings);
+        if (days != null) draft.annualLeave = days;
+      }
       const reasons = [];
       let recommend = true;
       if (already) { recommend = false; reasons.push(`${fyLabel(nextFy)}の任用が登録済み`); }
@@ -1008,7 +1079,7 @@
         a.workplace || '',
         a.title || '',
         hoursOf(a) != null ? hoursOf(a) : a.hoursText || '',
-        a.annualLeave === '' || a.annualLeave == null ? '-' : a.annualLeave,
+        a.annualLeave === '' || a.annualLeave == null ? (annualLeaveDays(data, a, settings) || '-') : a.annualLeave,
         a.baseAmount === '' || a.baseAmount == null ? '' : a.baseAmount,
         PAY_TYPE_LABEL[a.payType] || '',
         a.payAmount === '' || a.payAmount == null ? '' : a.payAmount,
@@ -1046,7 +1117,7 @@
     emptyData, normalizeData,
     appointmentsOfStaff, probationEnd, consecutiveReappointCount, yearInServiceOf, publicRecruitFy, validateAppointment, validateRenewal,
     kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
-    fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired,
+    fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, continuousServiceYears, annualLeaveDays,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     appointmentStatus, expiringAppointments,
     evaluationFor, suggestOverall, missingEvaluations, buildNextYearPlan,

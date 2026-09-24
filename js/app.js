@@ -457,7 +457,9 @@ function appointFields() {
     { key: 'end', label: '任用期間（終了）', type: 'date', required: true, hint: '開始日の属する会計年度の3月31日まで' },
     { key: 'weeklyHours', label: '勤務時間/週（時間）', type: 'number', step: '0.25', hint: `フルは${DATA.settings.fullTimeWeeklyHours}時間。日額・時間額で定まらない場合は空欄` },
     { key: 'hoursText', label: '勤務時間の記載（週時間が空欄のとき）', placeholder: '例：随時' },
-    { key: 'annualLeave', label: '年休（日数）', type: 'number' },
+    { key: 'weeklyDays', label: '1週間の勤務日数', type: 'number', hint: 'フル・月額パートは5日として判定。日額・時間額パートは入力（年休の判定に使用）' },
+    { key: 'annualWorkDays', label: '任用期間の勤務日数（週で定めない場合）', type: 'number' },
+    { key: 'annualLeave', label: '年休（日数）', type: 'number', hint: '付与日数（前年度からの繰越分は含めない）' },
     { type: 'heading', label: '給料・報酬・手当' },
     { key: 'baseAmount', label: '基礎額（円）', type: 'number' },
     { key: 'payAmount', label: '給料・報酬額（円）', type: 'number', hint: '月額・日額・時間額（区分による）' },
@@ -506,6 +508,8 @@ function judgeAppointment(rec) {
     taishuSwitch: sw ? md(sw.taishu) : null,
     sw,
     health: C.healthCheckRequired(rec, s),
+    annualLeave: rec.staffId ? C.annualLeaveDays(tmp, rec, s) : null,
+    serviceYears: rec.staffId ? C.continuousServiceYears(tmp, rec, s) : null,
     year: rec.staffId ? C.yearInServiceOf(tmp, rec) : null,
   };
 }
@@ -515,6 +519,7 @@ function judgeHtml(j) {
     <dt>給料・報酬額（算定式）</dt><dd>${v(j.payAmount, '円')} <small class="muted">第Ⅲ章</small></dd>
     <dt>給料・報酬／通勤手当の支給日</dt><dd>${v(j.payDay)} <small class="muted">第Ⅲ章3</small></dd>
     <dt>期末手当</dt><dd>${v(j.bonus)} <small class="muted">第Ⅳ章10（6か月以上かつ週15.5時間以上）</small></dd>
+    <dt>年休（付与日数）</dt><dd>${v(j.annualLeave, '日')} <small class="muted">第Ⅴ章1（継続勤務年数${j.serviceYears == null ? '—' : j.serviceYears === 0 ? '：任用の日' : `：${j.serviceYears}年`}。繰越分は含まない）</small></dd>
     <dt>社会保険（任用開始時）</dt><dd>${v(j.socialIns)} ${j.socialNote ? `<small class="warn-text">${escapeHtml(j.socialNote)}</small>` : ''} <small class="muted">第Ⅶ章1</small></dd>
     <dt>雇保／退手（任用開始時）</dt><dd>${v(j.empIns)} <small class="muted">第Ⅶ章2</small></dd>
     ${j.sw ? `<dt>フルタイム継続開始日</dt><dd>${j.sw.serviceStart}${j.sw.estimated ? '（年目から推定）' : ''}</dd>
@@ -524,7 +529,7 @@ function judgeHtml(j) {
     <dt>会計年度（何年目）</dt><dd>${j.year ? `${j.year}年目` : '—'}</dd>
   </dl>
   <button type="button" class="btn-secondary" id="judge-apply">判定結果を入力欄に反映</button>
-  <small class="muted">（給料・報酬額、支給日、期末手当、社会保険、雇保/退手、切替時期を上書きします）</small></div>`;
+  <small class="muted">（給料・報酬額、支給日、期末手当、年休、社会保険、雇保/退手、切替時期を上書きします）</small></div>`;
 }
 function openAppointForm(appt, preset = {}) {
   if (!DATA.staff.length) { alert('先に職員台帳に職員を登録してください。'); return; }
@@ -572,6 +577,7 @@ function openAppointForm(appt, preset = {}) {
       set('payDay', j.payDay);
       set('commuteDay', j.commuteDay);
       set('bonus', j.bonus);
+      set('annualLeave', j.annualLeave);
       set('socialIns', j.socialIns);
       set('empIns', j.empIns);
       document.getElementById('f-kyosaiSwitch').value = j.kyosaiSwitch || '';
@@ -1232,6 +1238,7 @@ const LAWS = [
       '第Ⅲ章1・2：給料＝基礎額、月額報酬＝基礎額×週時間/38.75、日額＝基礎額/21、時間額＝基礎額/162.75（1円未満切捨て） → 給料・報酬額の点検・自動計算',
       '第Ⅲ章3：支給日（フル・月額パート＝当月21日、日額・時間額パート＝翌月21日） → 支給日の点検',
       '第Ⅳ章10：期末手当＝任用期間6か月以上かつ週15時間30分以上 → 期末手当の判定',
+      '第Ⅴ章1：年次休暇（6月以上の任期の職員、週の勤務日数と継続勤務年数による表） → 年休の判定',
       '第Ⅶ章1・2：社会保険（週29時間以上＝共済短期＋厚生年金、フルは12月経過で共済組合）、雇用保険（週20時間以上かつ31日以上、フルは6月経過で退職手当） → 保険の判定・切替時期',
       '第Ⅶ章4：健康診断・ストレスチェック（任用1年かつ週29時間以上） → 判定表示',
       '第Ⅶ章5：人事評価（任期・フル/パートにかかわらず対象。任用の優先権は与えない） → 人事評価タブ',
@@ -1309,6 +1316,8 @@ function renderSettings() {
     <label>雇用保険：週時間（以上）<input type="number" step="0.25" id="set-empInsHours" value="${escapeHtml(s.empInsHours)}"><small>市マニュアル第Ⅶ章2</small></label>
     <label>フル：退職手当への切替（月経過）<input type="number" id="set-taishuMonths" value="${escapeHtml(s.taishuMonths)}"><small>市マニュアル第Ⅶ章2：6月</small></label>
     <label>フル：共済組合への切替（月経過）<input type="number" id="set-kyosaiMonths" value="${escapeHtml(s.kyosaiMonths)}"><small>市マニュアル第Ⅶ章1：12月</small></label>
+    <label class="checkbox-label full"><input type="checkbox" id="set-continuityResetOnPublic" ${s.continuityResetOnPublic !== false ? 'checked' : ''}>
+      公募で採用したとき、継続勤務年数（年休）とフルタイムの継続期間（退手・共済の切替）を数え直す（3年周期の1年目は「任用の日」の年休・共済(短期)・雇用保険）</label>
     <label>健康診断・ストレスチェック：週時間（以上）<input type="number" step="0.25" id="set-healthCheckHours" value="${escapeHtml(s.healthCheckHours)}"><small>市マニュアル第Ⅶ章4</small></label>
     <label>条件付採用期間（月）<input type="number" min="0" id="set-probationMonths" value="${escapeHtml(s.probationMonths)}">
       <small>原文（【国】地方公務員法第22条の2）で確認のうえ設定。0で非表示。</small></label>
@@ -1340,6 +1349,7 @@ function saveSettings() {
     taishuMonths: num('set-taishuMonths') ?? DATA.settings.taishuMonths,
     kyosaiMonths: num('set-kyosaiMonths') ?? DATA.settings.kyosaiMonths,
     healthCheckHours: num('set-healthCheckHours') ?? DATA.settings.healthCheckHours,
+    continuityResetOnPublic: document.getElementById('set-continuityResetOnPublic').checked,
     probationMonths: num('set-probationMonths') || 0,
     expiryAlertDays: num('set-expiryAlertDays') || 60,
     backupReminderDays: num('set-backupReminderDays') || 7,
