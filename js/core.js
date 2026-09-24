@@ -49,6 +49,8 @@
     kyosaiMonths: 12,
     // 健康診断・ストレスチェック（市マニュアル第Ⅶ章4：任用1年かつ週29時間以上）
     healthCheckHours: 29,
+    // 年休：週4日以内でも週この時間以上なら「5日以上」の区分（年次休暇の規定のただし書）
+    leaveFullColumnHours: 29,
     // 任期満了の何日前から一覧に警告表示するか
     expiryAlertDays: 60,
     // 評価段階（上位から）
@@ -322,17 +324,22 @@
     return { value: h >= Number(settings.empInsHours) && days >= 31 ? '雇用保険' : '無', sure: true };
   }
   /**
-   * 継続勤務年数（年休の表の行）：勤続開始日から任用開始日までの満年数。
-   * 例：R5.4.1から勤続 → R6.4.1の任用は1年、R8.4.1は3年（公募をまたいでも切れ目がなければ通算）。
+   * 継続勤務年数（年休の表の行）：勤続開始日から任用の日までの年数。
+   * 1年未満の端数は1年とみなす（年次休暇の規定）。勤続開始日当日の任用は「任用の日」（0）。
+   * 例：R5.4.1から勤続 → R6.4.1は1年、R8.4.1は3年。R5.11.1から勤続 → R6.4.1は5か月の端数で1年。
+   * 公募をまたいでも切れ目がなければ通算する。
    */
   function continuousServiceYears(data, appt) {
     const ss = serviceStartOf(data, appt, false);
     if (!ss) return null;
     const s0 = parseISO(ss.date);
     const s1 = parseISO(appt.start);
+    if (s1 <= s0) return 0;
     let y = s1.getFullYear() - s0.getFullYear();
     if (s1.getMonth() < s0.getMonth() || (s1.getMonth() === s0.getMonth() && s1.getDate() < s0.getDate())) y -= 1;
-    return Math.max(y, 0);
+    // 満y年の応当日より後なら端数あり → 1年とみなして切り上げ
+    const anniversary = addMonthsISO(ss.date, y * 12);
+    return anniversary < appt.start ? y + 1 : y;
   }
   // 年次休暇の日数表（市マニュアル第Ⅴ章1）。行：継続勤務年数0〜6以上、列：週5日以上・4日・3日・2日・1日
   const ANNUAL_LEAVE_TABLE = [
@@ -345,9 +352,15 @@
     [20, 15, 11, 7, 3],
   ];
   /** 年休の表の列（週の勤務日数、なければ任用期間の勤務日数から）。判定できなければ null、対象外は -1 */
-  function annualLeaveColumn(appt) {
+  function annualLeaveColumn(appt, settings) {
     const wd = Number(appt.weeklyDays) || (appt.type === 'full' || appt.payType === 'monthly' ? 5 : 0);
-    if (wd) return wd >= 5 ? 0 : 5 - Math.floor(wd);
+    if (wd) {
+      if (wd >= 5) return 0;
+      // ただし書：週の勤務日が4日以内でも、週の勤務時間が29時間以上なら「5日以上」の区分
+      const h = hoursOf(appt);
+      if (h != null && h >= Number((settings || {}).leaveFullColumnHours || 29)) return 0;
+      return 5 - Math.floor(wd);
+    }
     const ad = Number(appt.annualWorkDays);
     if (!ad) return null;
     if (ad >= 217) return 0;
@@ -366,7 +379,7 @@
     const m = termMonths(appt);
     if (m == null) return null;
     if (m < 6) return 0;
-    const col = annualLeaveColumn(appt);
+    const col = annualLeaveColumn(appt, settings);
     if (col == null) return null;
     if (col < 0) return 0;
     const years = Math.min(continuousServiceYears(data, appt) || 0, 6);
@@ -459,7 +472,7 @@
     if (appt.annualLeave !== '' && appt.annualLeave != null && appt.staffId) {
       const days = annualLeaveDays(data, appt, settings);
       if (days != null && days !== Number(appt.annualLeave)) {
-        warn(`年休は${days}日と判定されます（入力：${appt.annualLeave}日。前年度からの繰越分は含めません）。`, MAN('第Ⅴ章1'));
+        warn(`年休は${days}日と判定されます（入力：${appt.annualLeave}日。前年度からの繰越分は含めません）。`, `${MAN('第Ⅴ章1')}／年次休暇の規定（週29時間以上のただし書、継続勤務年数の端数は1年）`);
       }
     }
     if (/保育士/.test(appt.title || '') && normInsText(appt.hoikushiCheck) !== '済') {

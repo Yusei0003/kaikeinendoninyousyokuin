@@ -351,3 +351,35 @@ test('勤続が途切れた場合・履歴がない場合・勤続開始日の�
   // 3年周期の年目は入力どおり1年目のまま（公募の判断は別）
   assert.strictEqual(C.yearInServiceOf(d, manual), 1);
 });
+
+test('年休：継続勤務年数の1年未満の端数は1年とみなす', () => {
+  const d = baseData();
+  const full = (over) => appt({ type: 'full', payType: 'monthly', weeklyHours: 38.75, ...over });
+  // R5.11.1採用（任期5か月は6月未満のため年休の対象外）→ R6.4.1は端数5か月で1年
+  const r5 = full({ id: 'r5', fiscalYear: 2023, start: '2023-11-01', end: '2024-03-31', recruitMethod: 'public' });
+  const r6 = full({ id: 'r6', fiscalYear: 2024, start: '2024-04-01', end: '2025-03-31', recruitMethod: 'reappoint' });
+  const r7 = full({ id: 'r7', fiscalYear: 2025, start: '2025-04-01', end: '2026-03-31', recruitMethod: 'reappoint' });
+  d.appointments.push(r5, r6, r7);
+  assert.strictEqual(C.continuousServiceYears(d, r5), 0);
+  assert.strictEqual(C.annualLeaveDays(d, r5, d.settings), 0);
+  assert.strictEqual(C.continuousServiceYears(d, r6), 1);
+  assert.strictEqual(C.annualLeaveDays(d, r6, d.settings), 11);
+  assert.strictEqual(C.continuousServiceYears(d, r7), 2);
+  assert.strictEqual(C.annualLeaveDays(d, r7, d.settings), 12);
+  // ちょうど満1年（R5.4.1→R6.4.1）は1年のまま
+  const a = full({ id: 'a', staffId: 's2', fiscalYear: 2023, start: '2023-04-01', end: '2024-03-31', recruitMethod: 'public' });
+  const b = full({ id: 'b', staffId: 's2', fiscalYear: 2024, start: '2024-04-01', end: '2025-03-31', recruitMethod: 'reappoint' });
+  d.appointments.push(a, b);
+  assert.strictEqual(C.continuousServiceYears(d, b), 1);
+});
+
+test('年休：週4日以内でも週29時間以上なら「5日以上」の区分', () => {
+  const d = baseData();
+  const p = (over) => appt({ type: 'part', payType: 'hourly', yearInService: 1, ...over });
+  assert.strictEqual(C.annualLeaveDays(d, p({ weeklyDays: 4, weeklyHours: 31 }), d.settings), 10);
+  assert.strictEqual(C.annualLeaveDays(d, p({ weeklyDays: 4, weeklyHours: 29 }), d.settings), 10);
+  assert.strictEqual(C.annualLeaveDays(d, p({ weeklyDays: 4, weeklyHours: 28 }), d.settings), 7);
+  assert.strictEqual(C.annualLeaveDays(d, p({ weeklyDays: 3, weeklyHours: 23.25 }), d.settings), 5);
+  // 週以外の期間で定める場合は中欄（任用期間の勤務日数）
+  assert.strictEqual(C.annualLeaveDays(d, p({ annualWorkDays: 130 }), d.settings), 5);
+});
