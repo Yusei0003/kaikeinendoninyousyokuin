@@ -556,6 +556,89 @@
   }
 
   /* ------------------------------------------------------------
+   * 経歴（職員ごとの任用の変遷）
+   * ------------------------------------------------------------ */
+  /**
+   * 職員の経歴を古い順に返す。前の任用からの変更点（所属・職名・区分・勤務時間・報酬・途切れ・公募）を付ける。
+   * 戻り値：{ rows:[{ appt, fy, cycleYear, serviceYears, changes:[{kind,text}] }], summary }
+   */
+  function careerOf(data, staffId, settings, todayISO) {
+    const list = appointmentsOfStaff(data, staffId).filter((a) => a.status !== 'canceled' && parseISO(a.start));
+    const rows = [];
+    let prev = null;
+    const num = (v) => (v === '' || v == null ? null : Number(v));
+    for (const a of list) {
+      const changes = [];
+      if (!prev) {
+        changes.push({ kind: 'first', text: '初めての任用' });
+      } else {
+        const gapDays = diffDays(prev.end, a.start) - 1;
+        if (gapDays > 0) changes.push({ kind: 'gap', text: `前の任期（${toWarekiShort(prev.end)}まで）から${gapDays}日空いている → 勤続は数え直し` });
+        if ((prev.dept || '') !== (a.dept || '')) changes.push({ kind: 'dept', text: `所属：${prev.dept || '—'} → ${a.dept || '—'}` });
+        if ((prev.title || '') !== (a.title || '')) changes.push({ kind: 'title', text: `職名：${prev.title || '—'} → ${a.title || '—'}` });
+        if (kubunOf(prev) !== kubunOf(a)) changes.push({ kind: 'kubun', text: `区分：${KUBUN_LABEL[kubunOf(prev)]} → ${KUBUN_LABEL[kubunOf(a)]}` });
+        if (hoursOf(prev) !== hoursOf(a)) changes.push({ kind: 'hours', text: `勤務時間/週：${hoursOf(prev) ?? (prev.hoursText || '—')} → ${hoursOf(a) ?? (a.hoursText || '—')}` });
+        if (num(prev.payAmount) !== num(a.payAmount)) {
+          changes.push({ kind: 'pay', text: `給料・報酬：${num(prev.payAmount) == null ? '—' : num(prev.payAmount).toLocaleString('ja-JP')} → ${num(a.payAmount) == null ? '—' : num(a.payAmount).toLocaleString('ja-JP')}円` });
+        }
+      }
+      if (a.recruitMethod === 'public' && prev) changes.push({ kind: 'public', text: '公募により採用（3年周期の1年目に戻る）' });
+      for (const r of a.renewals || []) changes.push({ kind: 'renew', text: `${toWarekiShort(r.date)} 任期更新：終了日 ${toWarekiShort(r.oldEnd)} → ${toWarekiShort(r.newEnd)}` });
+      rows.push({
+        appt: a,
+        fy: fiscalYearOf(a.start),
+        cycleYear: yearInServiceOf(data, a),
+        serviceYears: continuousServiceYears(data, a),
+        publicFy: publicRecruitFy(data, a, settings),
+        changes,
+      });
+      prev = a;
+    }
+    const last = list[list.length - 1] || null;
+    const current = todayISO ? list.find((a) => a.start <= todayISO && todayISO <= a.end) || null : null;
+    const ss = last ? serviceStartOf(data, last, false) : null;
+    return {
+      rows,
+      summary: {
+        firstStart: list.length ? list[0].start : null,
+        serviceStart: ss ? ss.date : null,
+        serviceEstimated: ss ? ss.estimated : false,
+        serviceYears: last ? continuousServiceYears(data, last) : null,
+        fiscalYears: [...new Set(list.map((a) => fiscalYearOf(a.start)))].length,
+        current,
+        last,
+        cycleYear: last ? yearInServiceOf(data, last) : null,
+        publicFy: last ? publicRecruitFy(data, last, settings) : null,
+        deptChanges: rows.filter((r) => r.changes.some((c) => c.kind === 'dept')).length,
+        titleChanges: rows.filter((r) => r.changes.some((c) => c.kind === 'title')).length,
+      },
+    };
+  }
+
+  /** 年度ごとの集計（年度別サマリー用） */
+  function fiscalYearSummary(data, fy) {
+    const list = data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === Number(fy));
+    const staffIds = [...new Set(list.map((a) => a.staffId))];
+    const byKubun = {};
+    for (const a of list) byKubun[kubunOf(a)] = (byKubun[kubunOf(a)] || 0) + 1;
+    const nextIds = new Set(data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === Number(fy) + 1).map((a) => a.staffId));
+    const evaluated = staffIds.filter((id) => data.evaluations.some((e) => e.staffId === id && Number(e.fiscalYear) === Number(fy))).length;
+    return {
+      fy: Number(fy),
+      appointments: list.length,
+      staff: staffIds.length,
+      byKubun,
+      publicCount: list.filter((a) => a.recruitMethod === 'public').length,
+      reappointCount: list.filter((a) => a.recruitMethod === 'reappoint').length,
+      continuing: staffIds.filter((id) => nextIds.has(id)).length,
+      evaluated,
+    };
+  }
+  function fiscalYearsInData(data) {
+    return [...new Set(data.appointments.filter((a) => a.start).map((a) => fiscalYearOf(a.start)))].sort((a, b) => a - b);
+  }
+
+  /* ------------------------------------------------------------
    * 人事評価
    * ------------------------------------------------------------ */
   function evaluationFor(data, staffId, fy) {
@@ -1151,7 +1234,7 @@
     fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     appointmentStatus, expiringAppointments,
-    evaluationFor, suggestOverall, missingEvaluations, buildNextYearPlan,
+    evaluationFor, suggestOverall, missingEvaluations, buildNextYearPlan, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };

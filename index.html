@@ -14,10 +14,9 @@
       <h1>会計年度任用職員 一元管理</h1>
       <p class="subtitle">任用・人事評価・採用試験をまとめて管理します。データはこの端末のブラウザ内に保存され、外部とは通信しません（LGWAN端末でそのまま使えます）。</p>
     </div>
-    <label class="fy-picker">対象年度
-      <select id="global-fy"></select>
-    </label>
+    <select id="global-fy" class="hidden" aria-label="対象年度"></select>
   </div>
+  <div class="fy-bar"><span class="fy-bar-label">対象年度</span><div id="fy-chips" class="fy-chips"></div></div>
   <div id="backup-banner" class="banner hidden"></div>
 </header>
 
@@ -37,6 +36,11 @@
   <!-- ============ ホーム ============ -->
   <section id="panel-home" class="tab-panel active">
     <div id="home-stats" class="stat-grid"></div>
+    <div class="card">
+      <h2>年度別の状況</h2>
+      <p class="hint">年度ごとの任用人数・区分・採用方法・翌年度への継続・人事評価の入力状況です。「この年度を開く」でその年度の任用一覧に切り替わります。画面上部の年度ボタンでも切り替えられます。</p>
+      <div id="home-years"></div>
+    </div>
     <div class="card">
       <h2>今後90日以内の手続き・確認</h2>
       <p class="hint">フルタイムの雇用保険→退職手当（6月経過）・共済組合（短期）→共済組合（12月経過）の切替、任用伺いの未受理、保育士の登録取消者確認の未済を表示します。</p>
@@ -72,11 +76,12 @@
       <div class="card-header-row">
         <h2>職員台帳</h2>
         <div class="row-actions">
+          <label class="checkbox-label inline"><input type="checkbox" id="staff-fy-only" checked> 対象年度に任用のある職員のみ</label>
           <input type="search" id="staff-search" placeholder="番号・氏名・かなで検索">
           <button class="btn-primary" id="btn-staff-add">職員を追加</button>
         </div>
       </div>
-      <p class="hint">職員ごとの任用履歴・人事評価・応募歴は「詳細」からまとめて確認できます。</p>
+      <p class="hint">氏名を押すと経歴（いつから働いているか、年度ごとの所属・職名と変更点、人事評価、応募歴）を確認できます。</p>
       <div id="staff-table"></div>
     </div>
   </section>

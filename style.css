@@ -39,21 +39,6 @@ body {
 }
 .app-header h1 { margin: 0 0 4px; font-size: 22px; }
 .subtitle { margin: 0; color: var(--muted); font-size: 14px; }
-.fy-picker {
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  color: var(--muted);
-  gap: 4px;
-}
-.fy-picker select {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 15px;
-  font-weight: 600;
-  background: #fff;
-}
 
 .banner {
   margin-top: 12px;
@@ -472,3 +457,68 @@ td.issues-cell { min-width: 260px; }
 .schedule li:last-child { border-bottom: none; }
 .schedule li.now { background: #eef4ff; font-weight: 600; border-radius: 6px; }
 .schedule .month { flex: 0 0 3em; color: var(--primary); font-weight: 700; }
+
+/* ---------- 年度の切替 ---------- */
+.fy-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.fy-bar-label { font-size: 12px; color: var(--muted); }
+.fy-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.fy-chip, .fy-nav {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+.fy-chip small { font-size: 10px; color: var(--primary); }
+.fy-chip .fy-count { font-size: 11px; color: var(--muted); background: #eef2f7; border-radius: 999px; padding: 0 6px; }
+.fy-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 700; }
+.fy-chip.active small, .fy-chip.active .fy-count { color: #fff; background: rgba(255, 255, 255, 0.2); }
+.fy-nav { padding: 5px 10px; color: var(--muted); }
+
+/* ---------- 経歴 ---------- */
+a.name-link { color: var(--primary); text-decoration: none; font-weight: 600; }
+a.name-link:hover { text-decoration: underline; }
+.sum-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.sum-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; background: #f8fafc; }
+.sum-label { font-size: 11px; color: var(--muted); }
+.sum-value { font-size: 15px; font-weight: 700; }
+.sum-sub { font-size: 12px; color: var(--muted); }
+.kv.compact { grid-template-columns: max-content 1fr max-content 1fr; font-size: 13px; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 8px; border-left: 2px solid var(--border); }
+.tl-item { position: relative; display: grid; grid-template-columns: 120px 1fr; gap: 12px; padding: 10px 0 10px 14px; }
+.tl-item::before { content: ''; position: absolute; left: -7px; top: 16px; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid var(--border); }
+.tl-item.current::before { border-color: var(--primary); background: var(--primary); }
+.tl-item.current .tl-body { border-color: #c7d7fb; background: #f5f8ff; }
+.tl-year { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.tl-fy { font-weight: 700; }
+.tl-year .badge { background: #eef2f7; color: var(--text); }
+.tl-year .badge.ok { background: var(--ok-bg); color: var(--ok); }
+.tl-body { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.tl-period { font-size: 13px; }
+.tl-main { font-size: 15px; margin: 2px 0; }
+.tl-sub { font-size: 12px; color: var(--muted); }
+.tl-changes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tl-actions { margin-top: 8px; }
+.chg { font-size: 12px; border-radius: 6px; padding: 2px 8px; background: #eef2f7; }
+.chg b { margin-right: 4px; }
+.chg-dept { background: #dbeafe; color: #1e3a8a; }
+.chg-title { background: #ede9fe; color: #5b21b6; }
+.chg-gap { background: #fee2e2; color: #991b1b; }
+.chg-public { background: var(--ok-bg); color: var(--ok); }
+.chg-renew { background: #ffedd5; color: #9a3412; }
+.chg-kubun, .chg-hours { background: #fef3c7; color: #92400e; }
+.chg-first { background: #e0f2fe; color: #075985; }
+@media (max-width: 640px) {
+  .tl-item { grid-template-columns: 1fr; }
+  .kv.compact { grid-template-columns: max-content 1fr; }
+}
+
+.issue-details { margin: 4px 0 0; }
+.issue-details summary { font-size: 12px; }
+td.issues-cell { min-width: 120px; }

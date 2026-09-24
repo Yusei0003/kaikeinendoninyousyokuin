@@ -392,3 +392,44 @@ test('年休：週4日以内でも週29時間以上なら「5日以上」の区�
   // 週以外の期間で定める場合は中欄（任用期間の勤務日数）
   assert.strictEqual(C.annualLeaveDays(d, p({ annualWorkDays: 130 }), d.settings), 5);
 });
+
+test('経歴：所属・職名・区分・報酬の変更、途切れ、公募を検出', () => {
+  const d = baseData();
+  d.appointments.push(
+    appt({ id: 'c1', fiscalYear: 2023, start: '2023-04-01', end: '2024-03-31', dept: '市民課', title: '事務補助員', payAmount: 1000, recruitMethod: 'public' }),
+    appt({ id: 'c2', fiscalYear: 2024, start: '2024-04-01', end: '2025-03-31', dept: '税務課', title: '事務補助員', payAmount: 1000, recruitMethod: 'reappoint' }),
+    appt({ id: 'c3', fiscalYear: 2026, start: '2026-04-01', end: '2027-03-31', dept: '税務課', title: '事務専門員', payAmount: 1100, recruitMethod: 'public',
+      renewals: [{ date: '2026-09-01', oldEnd: '2026-09-30', newEnd: '2027-03-31' }] }),
+  );
+  const c = C.careerOf(d, 's1', d.settings, '2026-06-01');
+  assert.strictEqual(c.rows.length, 3);
+  assert.deepStrictEqual(c.rows[0].changes.map((x) => x.kind), ['first']);
+  assert.deepStrictEqual(c.rows[1].changes.map((x) => x.kind), ['dept']);
+  const k3 = c.rows[2].changes.map((x) => x.kind);
+  for (const k of ['gap', 'title', 'pay', 'public', 'renew']) assert.ok(k3.includes(k), k);
+  assert.strictEqual(c.summary.firstStart, '2023-04-01');
+  assert.strictEqual(c.summary.serviceStart, '2026-04-01'); // R7年度に途切れたため数え直し
+  assert.strictEqual(c.summary.fiscalYears, 3);
+  assert.strictEqual(c.summary.current.id, 'c3');
+  assert.strictEqual(c.summary.deptChanges, 1);
+  assert.strictEqual(c.summary.titleChanges, 1);
+});
+
+test('年度別サマリー', () => {
+  const d = baseData();
+  d.staff.push({ id: 's2', name: 'b' });
+  d.appointments.push(
+    appt({ id: 'y1', recruitMethod: 'public' }),
+    appt({ id: 'y2', staffId: 's2', type: 'full', payType: 'monthly', weeklyHours: 38.75, recruitMethod: 'reappoint' }),
+    appt({ id: 'y3', fiscalYear: 2027, start: '2027-04-01', end: '2028-03-31', recruitMethod: 'reappoint' }),
+  );
+  d.evaluations.push({ id: 'e', staffId: 's1', fiscalYear: 2026, overall: 'A' });
+  const sm = C.fiscalYearSummary(d, 2026);
+  assert.strictEqual(sm.staff, 2);
+  assert.strictEqual(sm.byKubun.full, 1);
+  assert.strictEqual(sm.byKubun.part_hourly, 1);
+  assert.strictEqual(sm.publicCount, 1);
+  assert.strictEqual(sm.continuing, 1);
+  assert.strictEqual(sm.evaluated, 1);
+  assert.deepStrictEqual(C.fiscalYearsInData(d), [2026, 2027]);
+});
