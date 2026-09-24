@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会計年度任用職員 一元管理</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app-root">
+<header class="app-header">
+  <div class="header-row">
+    <div>
+      <h1>会計年度任用職員 一元管理</h1>
+      <p class="subtitle">任用・人事評価・採用試験をまとめて管理します。データはこの端末のブラウザ内に保存され、外部とは通信しません（LGWAN端末でそのまま使えます）。</p>
+    </div>
+    <label class="fy-picker">対象年度
+      <select id="global-fy"></select>
+    </label>
+  </div>
+  <div id="backup-banner" class="banner hidden"></div>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="home">ホーム</button>
+  <button class="tab-btn" data-tab="staff">職員台帳</button>
+  <button class="tab-btn" data-tab="appoint">任用管理</button>
+  <button class="tab-btn" data-tab="eval">人事評価</button>
+  <button class="tab-btn" data-tab="exam">採用試験</button>
+  <button class="tab-btn" data-tab="import">Excel取込</button>
+  <button class="tab-btn" data-tab="law">根拠法令</button>
+  <button class="tab-btn" data-tab="settings">設定・バックアップ</button>
+  <button class="tab-btn" data-tab="help">使い方</button>
+</nav>
+
+<main>
+  <!-- ============ ホーム ============ -->
+  <section id="panel-home" class="tab-panel active">
+    <div id="home-stats" class="stat-grid"></div>
+    <div class="card">
+      <h2>任期満了が近い職員</h2>
+      <p class="hint">本日から「設定」で指定した日数以内に任期が満了する在職中の職員です。</p>
+      <div id="home-expiring"></div>
+    </div>
+    <div class="card">
+      <h2>人事評価が未入力の職員（対象年度）</h2>
+      <div id="home-missing-eval"></div>
+    </div>
+    <div class="card">
+      <h2>実施中の採用試験</h2>
+      <div id="home-exams"></div>
+    </div>
+  </section>
+
+  <!-- ============ 職員台帳 ============ -->
+  <section id="panel-staff" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2>職員台帳</h2>
+        <div class="row-actions">
+          <input type="search" id="staff-search" placeholder="番号・氏名・かなで検索">
+          <button class="btn-primary" id="btn-staff-add">職員を追加</button>
+        </div>
+      </div>
+      <p class="hint">職員ごとの任用履歴・人事評価・応募歴は「詳細」からまとめて確認できます。</p>
+      <div id="staff-table"></div>
+    </div>
+  </section>
+
+  <!-- ============ 任用管理 ============ -->
+  <section id="panel-appoint" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2>任用一覧</h2>
+        <div class="row-actions">
+          <input type="search" id="appoint-search" placeholder="氏名・所属・職名で検索">
+          <select id="appoint-status-filter">
+            <option value="">すべての状態</option>
+            <option value="planned">任用予定</option>
+            <option value="active">在職中</option>
+            <option value="ended">任期満了</option>
+            <option value="canceled">取消</option>
+          </select>
+          <label class="checkbox-label inline"><input type="checkbox" id="appoint-issue-only"> 要確認のみ</label>
+          <button class="btn-primary" id="btn-appoint-add">任用を登録</button>
+          <button class="btn-secondary" id="btn-next-plan">次年度の任用案を作成</button>
+          <button class="btn-secondary" id="btn-appoint-export">Excelに書き出す</button>
+        </div>
+      </div>
+      <p class="hint">任期は採用の日の属する会計年度の末日まで（【国】地方公務員法第22条の2）。登録時にフルタイム／パートタイムの勤務時間、任期の重複、公募によらない再度の任用の回数を自動で点検します。</p>
+      <div id="appoint-table"></div>
+    </div>
+  </section>
+
+  <!-- ============ 人事評価 ============ -->
+  <section id="panel-eval" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2>人事評価</h2>
+        <div class="row-actions">
+          <label class="checkbox-label inline"><input type="checkbox" id="eval-missing-only"> 未入力のみ</label>
+          <button class="btn-secondary" id="btn-eval-export">Excelに書き出す</button>
+        </div>
+      </div>
+      <p class="hint">対象年度に任用のある職員が一覧に出ます。評価結果は次年度の再度の任用案の判定に使われます（推薦とする総合評価は「設定」で変更できます）。</p>
+      <div id="eval-table"></div>
+    </div>
+  </section>
+
+  <!-- ============ 採用試験 ============ -->
+  <section id="panel-exam" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2>採用試験・選考</h2>
+        <div class="row-actions">
+          <button class="btn-primary" id="btn-exam-add">試験を登録</button>
+        </div>
+      </div>
+      <p class="hint">会計年度任用職員の採用は競争試験又は選考による（【国】地方公務員法第22条の2）。応募者の得点を入力すると合計点・順位を自動計算し、合格者はそのまま職員台帳・任用に登録できます。</p>
+      <div id="exam-table"></div>
+    </div>
+    <div id="exam-detail"></div>
+  </section>
+
+  <!-- ============ Excel取込 ============ -->
+  <section id="panel-import" class="tab-panel">
+    <div class="card">
+      <h2>Excelから取り込む</h2>
+      <p class="hint">既存のExcel台帳（.xlsx／.xls／.csv）をそのまま読み込めます。1行目以外に見出しがあっても、先頭10行から見出し行を自動で探し、「氏名」「所属課」「任期（自）」などの列名の揺れも吸収します。取込前に内容を確認できます。</p>
+      <form id="import-form" class="grid-form">
+        <label>取り込む内容
+          <select id="import-kind">
+            <option value="staff">職員台帳</option>
+            <option value="appointments">任用（任期・所属・報酬など）</option>
+            <option value="evaluations">人事評価</option>
+          </select>
+        </label>
+        <label>ファイル<input type="file" id="import-file" accept=".xlsx,.xls,.csv"></label>
+        <label>シート<select id="import-sheet"></select></label>
+        <label class="checkbox-label"><input type="checkbox" id="import-create-staff" checked> 台帳にない職員は自動で追加する（任用・評価の取込時）</label>
+      </form>
+      <div class="row-actions">
+        <button class="btn-secondary" id="btn-import-template">取込用のひな形をダウンロード</button>
+      </div>
+      <div id="import-preview"></div>
+    </div>
+  </section>
+
+  <!-- ============ 根拠法令 ============ -->
+  <section id="panel-law" class="tab-panel">
+    <div class="card">
+      <h2>根拠法令</h2>
+      <p class="hint">このシステムの判定の根拠となる法令です。<strong>団体・レベル（国／市）ごとに区別</strong>して表示します。条文の本文は、この端末で確認した原文を貼り付けて保存してください（バックアップにも含まれます）。原文を確認していない判定は「要確認」として扱い、判定に使う値はすべて「設定」で変更できます。</p>
+      <div id="law-list"></div>
+    </div>
+  </section>
+
+  <!-- ============ 設定・バックアップ ============ -->
+  <section id="panel-settings" class="tab-panel">
+    <div class="card">
+      <h2>バックアップ</h2>
+      <p class="hint">データはこのブラウザの中だけに保存されています。ブラウザの閲覧データを削除したり端末を入れ替えたりすると消えるため、<strong>定期的にバックアップファイルを共有フォルダ等に保存</strong>してください。別の端末や後任者へは、このファイルを「復元」すればそのまま引き継げます。</p>
+      <p id="backup-status" class="muted"></p>
+      <div class="row-actions">
+        <button class="btn-primary" id="btn-backup">バックアップを保存（.json）</button>
+        <label class="btn-secondary file-btn">バックアップから復元<input type="file" id="restore-file" accept=".json" hidden></label>
+        <button class="btn-secondary" id="btn-export-all">全データをExcelに書き出す</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>判定に使う設定</h2>
+      <form id="settings-form" class="grid-form"></form>
+      <button class="btn-primary" id="btn-settings-save">設定を保存</button>
+    </div>
+    <div class="card danger-zone">
+      <h2>データの消去</h2>
+      <p class="hint">担当交代で端末を引き渡すときなどに使います。先にバックアップを保存してください。</p>
+      <button class="btn-danger" id="btn-clear-all">この端末のデータをすべて消去</button>
+    </div>
+  </section>
+
+  <!-- ============ 使い方 ============ -->
+  <section id="panel-help" class="tab-panel">
+    <div class="card">
+      <h2>使い方</h2>
+      <ol class="help-list">
+        <li><strong>はじめに</strong>：「Excel取込」で既存の職員台帳・任用一覧・評価結果を読み込みます（手入力でも登録できます）。</li>
+        <li><strong>任用</strong>：「任用管理」で任期・所属・勤務時間・報酬を登録します。会計年度を超える任期や、フル／パートの勤務時間の不一致、任期の重複はエラーになります。年度途中の延長は「任期更新」を使います。</li>
+        <li><strong>人事評価</strong>：「人事評価」で年度ごとに評価を入力します。評価結果と所見は次年度の任用案に反映されます。</li>
+        <li><strong>次年度の準備</strong>：「任用管理」の「次年度の任用案を作成」で、評価結果と再度の任用の回数をもとに翌年度の任用案を一括作成します。公募が必要な職員は推薦から外れ、理由が表示されます。</li>
+        <li><strong>採用試験</strong>：「採用試験」で試験・選考を登録し、応募者と得点を入力します。合格者は「任用登録」ボタンで職員台帳と任用にそのまま登録できます。</li>
+        <li><strong>バックアップ</strong>：作業の終わりに「設定・バックアップ」から保存してください。前回から一定日数が経過すると画面上部に警告が出ます。</li>
+      </ol>
+      <h3>注意事項</h3>
+      <ul class="help-list">
+        <li>データはこの端末のブラウザ（localStorage）に保存され、他の端末とは共有されません。複数人で使う場合は、バックアップファイルの受け渡しで引き継いでください。</li>
+        <li>個人情報を扱うため、共用端末では使用しないでください。</li>
+        <li>Excelの読み書きには同梱のSheetJS（<code>vendor/xlsx.core.min.js</code>、Apache License 2.0）を使っており、外部とは通信しません。</li>
+        <li>自動判定は補助です。最終的な判断は根拠法令（「根拠法令」タブ）の原文に基づいて行ってください。</li>
+      </ul>
+    </div>
+  </section>
+</main>
+</div>
+
+<!-- 汎用モーダル -->
+<div id="modal" class="modal-backdrop hidden">
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" id="modal-close" aria-label="閉じる">×</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- 印刷用 -->
+<div id="print-area"></div>
+
+<div id="toast" class="toast"></div>
+
+<script src="vendor/xlsx.core.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
