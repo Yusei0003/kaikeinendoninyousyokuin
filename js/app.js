@@ -461,7 +461,8 @@ function appointFields() {
     { key: 'hoursText', label: '勤務時間の記載（週時間が空欄のとき）', placeholder: '例：随時' },
     { key: 'weeklyDays', label: '1週間の勤務日数', type: 'number', hint: 'フル・月額パートは5日として判定。日額・時間額パートは入力（年休の判定に使用）' },
     { key: 'annualWorkDays', label: '任用期間の勤務日数（週で定めない場合）', type: 'number' },
-    { key: 'annualLeave', label: '年休（日数）', type: 'number', hint: '付与日数（前年度からの繰越分は含めない）' },
+    { key: 'leaveGrant', label: '年休の付与', type: 'select', options: Object.entries(C.LEAVE_GRANT_LABEL) },
+    { key: 'annualLeave', label: '年休（日数）', type: 'number', hint: '付与日数（前年度からの繰越分は含めない）。時間額パートで付与する場合はここに手入力' },
     { type: 'heading', label: '給料・報酬・手当' },
     { key: 'baseAmount', label: '基礎額（円）', type: 'number' },
     { key: 'payAmount', label: '給料・報酬額（円）', type: 'number', hint: '月額・日額・時間額（区分による）' },
@@ -510,6 +511,7 @@ function judgeAppointment(rec) {
     taishuSwitch: sw ? md(sw.taishu) : null,
     sw,
     health: C.healthCheckRequired(rec, s),
+    leave: rec.staffId ? C.annualLeaveInfo(tmp, rec, s) : null,
     annualLeave: rec.staffId ? C.annualLeaveDays(tmp, rec, s) : null,
     serviceYears: rec.staffId ? C.continuousServiceYears(tmp, rec) : null,
     service: rec.staffId ? C.serviceStartOf(tmp, rec, false) : null,
@@ -523,7 +525,7 @@ function judgeHtml(j) {
     <dt>給料・報酬額（算定式）</dt><dd>${v(j.payAmount, '円')} <small class="muted">第Ⅲ章</small></dd>
     <dt>給料・報酬／通勤手当の支給日</dt><dd>${v(j.payDay)} <small class="muted">第Ⅲ章3</small></dd>
     <dt>期末手当</dt><dd>${v(j.bonus)} <small class="muted">第Ⅳ章10（6か月以上かつ週15.5時間以上）</small></dd>
-    <dt>年休（付与日数）</dt><dd>${v(j.annualLeave, '日')} <small class="muted">第Ⅴ章1（継続勤務年数${j.serviceYears == null ? '—' : j.serviceYears === 0 ? '：任用の日' : `：${j.serviceYears}年`}。繰越分は含まない）</small></dd>
+    <dt>年休（付与日数）</dt><dd>${j.leave && !j.leave.granted ? `<strong>付与しない</strong> <small class="muted">${escapeHtml(j.leave.reason)}</small>` : v(j.annualLeave, '日')}${j.leave && j.leave.granted && j.leave.reason ? ` <small class="warn-text">${escapeHtml(j.leave.reason)}</small>` : ''} <small class="muted">第Ⅴ章1（継続勤務年数${j.serviceYears == null ? '—' : j.serviceYears === 0 ? '：任用の日' : `：${j.serviceYears}年`}。繰越分は含まない）</small></dd>
     <dt>社会保険（任用開始時）</dt><dd>${v(j.socialIns)} ${j.socialNote ? `<small class="warn-text">${escapeHtml(j.socialNote)}</small>` : ''} <small class="muted">第Ⅶ章1</small></dd>
     <dt>雇保／退手（任用開始時）</dt><dd>${v(j.empIns)} <small class="muted">第Ⅶ章2</small></dd>
     ${j.sw ? `<dt>フルタイム継続開始日</dt><dd>${j.sw.serviceStart}${j.sw.estimated ? '（年目から推定）' : ''}</dd>
@@ -582,7 +584,10 @@ function openAppointForm(appt, preset = {}) {
       set('payDay', j.payDay);
       set('commuteDay', j.commuteDay);
       set('bonus', j.bonus);
-      set('annualLeave', j.annualLeave);
+      if (j.leave && !j.leave.granted) {
+        // 時間額パートの既定（付与しない）では手入力した日数を消さない
+        if (!j.leave.defaultNone) document.getElementById('f-annualLeave').value = '';
+      } else set('annualLeave', j.annualLeave);
       set('socialIns', j.socialIns);
       set('empIns', j.empIns);
       document.getElementById('f-kyosaiSwitch').value = j.kyosaiSwitch || '';

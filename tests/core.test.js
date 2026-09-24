@@ -299,12 +299,20 @@ test('年休の付与日数（市マニュアル第Ⅴ章1）と3年周期の1�
   assert.match(msgs, /雇用保険／退職手当は「雇用保険」/);
   assert.strictEqual(C.annualLeaveDays(d, full({ id: 'y2', yearInService: 2 }), s), 11);
   assert.strictEqual(C.annualLeaveDays(d, full({ id: 'y3', yearInService: 3 }), s), 12);
-  // 時間額パート：週3日なら5日、勤務日数が不明なら判定不可、任期6月未満は対象外
+  // 時間額パート：既定は付与しない。手入力の日数は警告しない。「付与する」にすれば表で判定
   const hourly = appt({ id: 'h', type: 'part', payType: 'hourly', weeklyHours: '', yearInService: 1 });
-  assert.strictEqual(C.annualLeaveDays(d, hourly, s), null);
-  assert.strictEqual(C.annualLeaveDays(d, { ...hourly, weeklyDays: 3 }, s), 5);
-  assert.strictEqual(C.annualLeaveDays(d, { ...hourly, annualWorkDays: 130 }, s), 5);
-  assert.strictEqual(C.annualLeaveDays(d, { ...hourly, weeklyDays: 3, end: '2026-08-31' }, s), 0);
+  assert.strictEqual(C.annualLeaveInfo(d, hourly, s).granted, false);
+  assert.strictEqual(C.annualLeaveDays(d, { ...hourly, weeklyDays: 3 }, s), 0);
+  assert.ok(!C.validateAppointment({ ...hourly, annualLeave: 5 }, d, s).some((i) => /年休/.test(i.msg)));
+  const hGrant = { ...hourly, leaveGrant: 'grant' };
+  assert.strictEqual(C.annualLeaveDays(d, hGrant, s), null);
+  assert.strictEqual(C.annualLeaveDays(d, { ...hGrant, weeklyDays: 3 }, s), 5);
+  assert.strictEqual(C.annualLeaveDays(d, { ...hGrant, annualWorkDays: 130 }, s), 5);
+  // 日額パート（週3日）：任期が短くても既定は付与、「付与しない」を選べば0日
+  const daily = appt({ id: 'dy', type: 'part', payType: 'daily', weeklyDays: 3, weeklyHours: 20, yearInService: 1, end: '2026-08-31' });
+  assert.strictEqual(C.annualLeaveDays(d, daily, s), 5);
+  assert.strictEqual(C.annualLeaveDays(d, { ...daily, leaveGrant: 'none' }, s), 0);
+  assert.ok(C.validateAppointment({ ...daily, leaveGrant: 'none', annualLeave: 5 }, d, s).some((i) => /付与しない/.test(i.msg)));
 });
 
 test('勤続は公募をまたいでも通算し、3年周期の年目は公募で1年目に戻る', () => {
@@ -355,13 +363,14 @@ test('勤続が途切れた場合・履歴がない場合・勤続開始日の�
 test('年休：継続勤務年数の1年未満の端数は1年とみなす', () => {
   const d = baseData();
   const full = (over) => appt({ type: 'full', payType: 'monthly', weeklyHours: 38.75, ...over });
-  // R5.11.1採用（任期5か月は6月未満のため年休の対象外）→ R6.4.1は端数5か月で1年
+  // R5.11.1採用（任期5か月でも既定は付与：任用の日で10日）→ R6.4.1は端数5か月で1年
   const r5 = full({ id: 'r5', fiscalYear: 2023, start: '2023-11-01', end: '2024-03-31', recruitMethod: 'public' });
   const r6 = full({ id: 'r6', fiscalYear: 2024, start: '2024-04-01', end: '2025-03-31', recruitMethod: 'reappoint' });
   const r7 = full({ id: 'r7', fiscalYear: 2025, start: '2025-04-01', end: '2026-03-31', recruitMethod: 'reappoint' });
   d.appointments.push(r5, r6, r7);
   assert.strictEqual(C.continuousServiceYears(d, r5), 0);
-  assert.strictEqual(C.annualLeaveDays(d, r5, d.settings), 0);
+  assert.strictEqual(C.annualLeaveDays(d, r5, d.settings), 10);
+  assert.strictEqual(C.annualLeaveDays(d, { ...r5, leaveGrant: 'none' }, d.settings), 0);
   assert.strictEqual(C.continuousServiceYears(d, r6), 1);
   assert.strictEqual(C.annualLeaveDays(d, r6, d.settings), 11);
   assert.strictEqual(C.continuousServiceYears(d, r7), 2);
@@ -375,7 +384,7 @@ test('年休：継続勤務年数の1年未満の端数は1年とみなす', () 
 
 test('年休：週4日以内でも週29時間以上なら「5日以上」の区分', () => {
   const d = baseData();
-  const p = (over) => appt({ type: 'part', payType: 'hourly', yearInService: 1, ...over });
+  const p = (over) => appt({ type: 'part', payType: 'hourly', leaveGrant: 'grant', yearInService: 1, ...over });
   assert.strictEqual(C.annualLeaveDays(d, p({ weeklyDays: 4, weeklyHours: 31 }), d.settings), 10);
   assert.strictEqual(C.annualLeaveDays(d, p({ weeklyDays: 4, weeklyHours: 29 }), d.settings), 10);
   assert.strictEqual(C.annualLeaveDays(d, p({ weeklyDays: 4, weeklyHours: 28 }), d.settings), 7);

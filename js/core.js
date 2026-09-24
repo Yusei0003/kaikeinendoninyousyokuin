@@ -370,20 +370,35 @@
     if (ad >= 48) return 4;
     return -1;
   }
+  const LEAVE_GRANT_LABEL = {
+    '': '自動（時間額パートは付与しない、それ以外は付与する）',
+    grant: '付与する',
+    none: '付与しない（任期が短い等）',
+  };
   /**
-   * 年次休暇の付与日数（市マニュアル第Ⅴ章1）。
-   * 6月以上の任期が定められている職員が対象（対象外は 0）。前年度からの繰越分は含まない。
-   * 週の勤務日数：フル・月額パートは5日、日額・時間額パートは入力値（または任用期間の勤務日数）。
+   * 年次休暇の付与の判定。前年度からの繰越分は含まない。
+   *  - 任用ごとの「年休の付与」（leaveGrant）：自動／付与する／付与しない。
+   *    自動では、時間額パートは付与しない（必要な人は「付与する」にするか日数を手入力）、
+   *    それ以外は任期の長短にかかわらず付与する（任期が短く付与しない場合は「付与しない」を選ぶ）。
+   *  - 日数は表（市マニュアル第Ⅴ章1）の、週の勤務日数（フル・月額パートは5日）または任用期間の勤務日数の欄
+   *    ×継続勤務年数の行。
+   * 戻り値：{ granted, days, reason }。days は付与しないとき 0、判定できないとき null。
    */
-  function annualLeaveDays(data, appt, settings) {
-    const m = termMonths(appt);
-    if (m == null) return null;
-    if (m < 6) return 0;
+  function annualLeaveInfo(data, appt, settings) {
+    const mode = appt.leaveGrant || '';
+    if (mode === 'none') return { granted: false, days: 0, reason: '「付与しない」に設定' };
+    if (mode === '' && appt.type === 'part' && appt.payType === 'hourly') {
+      return { granted: false, days: 0, reason: '時間額パートのため付与しない（必要な場合は手入力）', defaultNone: true };
+    }
+    if (!parseISO(appt.start)) return { granted: true, days: null, reason: '任用期間が未入力' };
     const col = annualLeaveColumn(appt, settings);
-    if (col == null) return null;
-    if (col < 0) return 0;
+    if (col == null) return { granted: true, days: null, reason: '週の勤務日数（または任用期間の勤務日数）が未入力' };
+    if (col < 0) return { granted: true, days: 0, reason: '任用期間の勤務日数が48日未満' };
     const years = Math.min(continuousServiceYears(data, appt) || 0, 6);
-    return ANNUAL_LEAVE_TABLE[years][col];
+    return { granted: true, days: ANNUAL_LEAVE_TABLE[years][col], reason: '' };
+  }
+  function annualLeaveDays(data, appt, settings) {
+    return annualLeaveInfo(data, appt, settings).days;
   }
   /** 健康診断・ストレスチェックの対象（市マニュアル第Ⅶ章4） */
   function healthCheckRequired(appt, settings) {
@@ -470,8 +485,11 @@
       }
     }
     if (appt.annualLeave !== '' && appt.annualLeave != null && appt.staffId) {
-      const days = annualLeaveDays(data, appt, settings);
-      if (days != null && days !== Number(appt.annualLeave)) {
+      const info = annualLeaveInfo(data, appt, settings);
+      const days = info.days;
+      if (!info.granted && !info.defaultNone && Number(appt.annualLeave) > 0) {
+        warn(`年休の付与が「付与しない」に設定されていますが、年休が${appt.annualLeave}日入力されています。`, MAN('第Ⅴ章1'));
+      } else if (info.granted && days != null && days !== Number(appt.annualLeave)) {
         warn(`年休は${days}日と判定されます（入力：${appt.annualLeave}日。前年度からの繰越分は含めません）。`, `${MAN('第Ⅴ章1')}／年次休暇の規定（週29時間以上のただし書、継続勤務年数の端数は1年）`);
       }
     }
@@ -610,7 +628,9 @@
       };
       delete draft.createdAt;
       delete draft.examId;
-      if (draft.annualLeave !== '' && draft.annualLeave != null) {
+      // 任期が短いための「付与しない」は翌年度（通年）には引き継がない
+      if (draft.leaveGrant === 'none') draft.leaveGrant = '';
+      if (draft.annualLeave !== '' && draft.annualLeave != null && annualLeaveInfo(data, draft, settings).granted) {
         const days = annualLeaveDays({ ...data, appointments: data.appointments.concat([draft]) }, draft, settings);
         if (days != null) draft.annualLeave = days;
       }
@@ -1128,7 +1148,7 @@
     emptyData, normalizeData,
     appointmentsOfStaff, probationEnd, consecutiveReappointCount, yearInServiceOf, publicRecruitFy, validateAppointment, validateRenewal,
     kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
-    fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays,
+    fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     appointmentStatus, expiringAppointments,
     evaluationFor, suggestOverall, missingEvaluations, buildNextYearPlan,
