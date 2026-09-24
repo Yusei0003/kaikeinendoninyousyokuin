@@ -307,16 +307,47 @@ test('年休の付与日数（市マニュアル第Ⅴ章1）と3年周期の1�
   assert.strictEqual(C.annualLeaveDays(d, { ...hourly, weeklyDays: 3, end: '2026-08-31' }, s), 0);
 });
 
-test('公募をまたぐフルタイムの継続：既定は公募で数え直す（設定で通算も可）', () => {
+test('勤続は公募をまたいでも通算し、3年周期の年目は公募で1年目に戻る', () => {
   const d = baseData();
-  const prev = appt({ id: 'p', type: 'full', weeklyHours: 38.75, fiscalYear: 2025, start: '2025-04-01', end: '2026-03-31', recruitMethod: 'reappoint', yearInService: 3 });
-  const now = appt({ id: 'n', type: 'full', weeklyHours: 38.75, recruitMethod: 'public', yearInService: 1 });
-  d.appointments.push(prev, now);
-  assert.strictEqual(C.suggestSocialIns(d, now, d.settings).value, '共済(短期)');
-  assert.strictEqual(C.suggestEmpIns(d, now, d.settings).value, '雇用保険');
-  assert.strictEqual(C.annualLeaveDays(d, now, d.settings), 10);
-  const cont = { ...d.settings, continuityResetOnPublic: false };
-  assert.strictEqual(C.suggestSocialIns(d, now, cont).value, '共済');
-  assert.strictEqual(C.suggestEmpIns(d, now, cont).value, '退手');
-  assert.strictEqual(C.annualLeaveDays(d, now, cont), 11);
+  const full = (over) => appt({ type: 'full', payType: 'monthly', weeklyHours: 38.75, ...over });
+  // R5〜R7：1周期目（R5公募・R6/R7更新）、R8：公募で再び採用（2周期目の1年目）
+  d.appointments.push(
+    full({ id: 'r5', fiscalYear: 2023, start: '2023-04-01', end: '2024-03-31', recruitMethod: 'public' }),
+    full({ id: 'r6', fiscalYear: 2024, start: '2024-04-01', end: '2025-03-31', recruitMethod: 'reappoint' }),
+    full({ id: 'r7', fiscalYear: 2025, start: '2025-04-01', end: '2026-03-31', recruitMethod: 'reappoint' }),
+  );
+  const r8 = full({ id: 'r8', recruitMethod: 'public' });
+  d.appointments.push(r8);
+  // 3年周期：公募で1年目に戻り、次の公募はR11.4
+  assert.strictEqual(C.yearInServiceOf(d, r8), 1);
+  assert.strictEqual(C.publicRecruitFy(d, r8, d.settings), 2029);
+  // 勤続：R5.4.1から通算（3年）→ 年休14日、退手・共済に切替済み
+  assert.strictEqual(C.serviceStartOf(d, r8, false).date, '2023-04-01');
+  assert.strictEqual(C.continuousServiceYears(d, r8), 3);
+  assert.strictEqual(C.annualLeaveDays(d, r8, d.settings), 14);
+  assert.strictEqual(C.suggestSocialIns(d, r8, d.settings).value, '共済');
+  assert.strictEqual(C.suggestEmpIns(d, r8, d.settings).value, '退手');
+});
+
+test('勤続が途切れた場合・履歴がない場合・勤続開始日の入力', () => {
+  const d = baseData();
+  const full = (over) => appt({ type: 'full', payType: 'monthly', weeklyHours: 38.75, ...over });
+  // R6年度は任用なし（途切れ）→ R7公募の任用は勤続初年
+  d.appointments.push(full({ id: 'old', fiscalYear: 2023, start: '2023-04-01', end: '2024-03-31', recruitMethod: 'public' }));
+  const r7 = full({ id: 'r7', fiscalYear: 2025, start: '2025-04-01', end: '2026-03-31', recruitMethod: 'public' });
+  d.appointments.push(r7);
+  assert.strictEqual(C.continuousServiceYears(d, r7), 0);
+  assert.strictEqual(C.annualLeaveDays(d, r7, d.settings), 10);
+  // 履歴がない3年周期の1年目（10082の例）：初年扱い → 共済(短期)・雇用保険・年休10日
+  const lone = full({ id: 'lone', staffId: 's9', yearInService: 1 });
+  assert.strictEqual(C.suggestSocialIns(d, lone, d.settings).value, '共済(短期)');
+  assert.strictEqual(C.suggestEmpIns(d, lone, d.settings).value, '雇用保険');
+  assert.strictEqual(C.annualLeaveDays(d, lone, d.settings), 10);
+  // 勤続開始日・フル継続開始日を入力すれば、履歴がなくても通算される
+  const manual = { ...lone, serviceStart: '2020-04-01', fullTimeStart: '2025-04-01' };
+  assert.strictEqual(C.continuousServiceYears(d, manual), 6);
+  assert.strictEqual(C.annualLeaveDays(d, manual, d.settings), 20);
+  assert.strictEqual(C.suggestSocialIns(d, manual, d.settings).value, '共済');
+  // 3年周期の年目は入力どおり1年目のまま（公募の判断は別）
+  assert.strictEqual(C.yearInServiceOf(d, manual), 1);
 });

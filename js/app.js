@@ -442,7 +442,9 @@ function appointFields() {
     { type: 'heading', label: '職員・任用' },
     { key: 'staffId', label: '職員', type: 'select', options: staffOptions(), required: true },
     { key: 'recruitMethod', label: '採用方法', type: 'select', options: Object.entries(C.RECRUIT_LABEL) },
-    { key: 'yearInService', label: '会計年度（何年目）', type: 'number', hint: '採用月にかかわらず採用した年度を1年目と数える（例：R5.11採用→R5が1年目、R8.4に公募）。空欄なら任用履歴から自動計算' },
+    { key: 'yearInService', label: '会計年度（3年周期の何年目）', type: 'number', hint: '公募の判断用。採用月にかかわらず採用した年度を1年目と数え、公募で1年目に戻る（例：R5.11採用→R5が1年目、R8.4に公募）。空欄なら任用履歴から自動計算' },
+    { key: 'serviceStart', label: '勤続開始日（履歴がない場合）', type: 'date', hint: '公募をまたいで切れ目なく勤務している場合の最初の任用日。空欄なら任用履歴から自動計算（年休に使用）' },
+    { key: 'fullTimeStart', label: 'フルタイム継続開始日（履歴がない場合）', type: 'date', hint: 'フルタイムで切れ目なく勤務している最初の任用日。空欄なら任用履歴から自動計算（退手・共済の切替に使用）' },
     { key: 'ukagai', label: '任用伺い 受理済み（○）', type: 'checkbox' },
     { type: 'heading', label: '所属・業務' },
     { key: 'deptCode', label: '所属CD' },
@@ -509,7 +511,9 @@ function judgeAppointment(rec) {
     sw,
     health: C.healthCheckRequired(rec, s),
     annualLeave: rec.staffId ? C.annualLeaveDays(tmp, rec, s) : null,
-    serviceYears: rec.staffId ? C.continuousServiceYears(tmp, rec, s) : null,
+    serviceYears: rec.staffId ? C.continuousServiceYears(tmp, rec) : null,
+    service: rec.staffId ? C.serviceStartOf(tmp, rec, false) : null,
+    publicFy: rec.staffId ? C.publicRecruitFy(tmp, rec, s) : null,
     year: rec.staffId ? C.yearInServiceOf(tmp, rec) : null,
   };
 }
@@ -526,7 +530,8 @@ function judgeHtml(j) {
       <dt>雇保→退手 切替</dt><dd><strong>${j.sw.taishu}</strong> <small class="muted">6月経過</small></dd>
       <dt>健保→共済 切替</dt><dd><strong>${j.sw.kyosai}</strong> <small class="muted">12月経過</small></dd>` : ''}
     <dt>健康診断・ストレスチェック</dt><dd>${j.health ? '<strong>対象</strong>' : '対象外'} <small class="muted">第Ⅶ章4（任用1年かつ週29時間以上）</small></dd>
-    <dt>会計年度（何年目）</dt><dd>${j.year ? `${j.year}年目` : '—'}</dd>
+    <dt>勤続（継続勤務）</dt><dd>${j.service ? `${j.service.date}から${j.service.manual ? '（入力値）' : j.service.estimated ? '（年目から推定）' : ''}・継続勤務年数 ${j.serviceYears === 0 ? '任用の日' : `${j.serviceYears}年`}` : '—'} <small class="muted">公募をまたいでも切れ目がなければ通算（年休・退手・共済に使用）</small></dd>
+    <dt>3年周期の年目（公募の判断）</dt><dd>${j.year ? `${j.year}年目` : '—'}${j.publicFy ? `・<strong>${C.toWarekiShort(C.fiscalYearStart(j.publicFy)).replace(/\.1$/, '')}に公募</strong>` : ''} <small class="muted">第Ⅷ章2（公募で1年目に戻る）</small></dd>
   </dl>
   <button type="button" class="btn-secondary" id="judge-apply">判定結果を入力欄に反映</button>
   <small class="muted">（給料・報酬額、支給日、期末手当、年休、社会保険、雇保/退手、切替時期を上書きします）</small></div>`;
@@ -637,17 +642,25 @@ function publicRecruitCell(a) {
   const label = C.toWarekiShort(C.fiscalYearStart(pfy)).replace(/\.1$/, '');
   return pfy <= C.fiscalYearOf(a.start) + 1 ? `<span class="badge warn">${label}</span>` : label;
 }
+/** 勤続（継続勤務年数）。公募をまたいでも通算 */
+function serviceCell(a) {
+  const ss = C.serviceStartOf(DATA, a, false);
+  if (!ss) return '<span class="muted">-</span>';
+  const y = C.continuousServiceYears(DATA, a);
+  return `<span title="${ss.date}から${ss.estimated ? '（推定）' : ''}">${y === 0 ? '初年' : `${y}年`}${ss.estimated ? '<small class="muted">推</small>' : ''}</span>`;
+}
 function renderAppointments() {
   const rows = filteredAppointments();
   const dash = (v) => (v === '' || v == null ? '<span class="muted">-</span>' : escapeHtml(v));
   document.getElementById('appoint-table').innerHTML = tableHtml(
-    ['伺い', '年目', '公募', '職員番号', '区分', '氏名', '所属', '業務内容', '任用期間', '時間/週', '年休', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手', '保育士確認', '状態', '点検', ''],
+    ['伺い', '年目', '公募', '勤続', '職員番号', '区分', '氏名', '所属', '業務内容', '任用期間', '時間/週', '年休', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手', '保育士確認', '状態', '点検', ''],
     rows.map(({ a, status, issues }) => {
       const s = staffById(a.staffId) || {};
       return `<tr class="${status === 'canceled' ? 'row-muted' : issues.some((i) => i.level === 'error') ? 'row-error' : issues.length ? 'row-warning' : ''}">
       <td>${a.ukagai ? '○' : '<span class="badge warn">未</span>'}</td>
       <td>${C.yearInServiceOf(DATA, a)}</td>
       <td>${publicRecruitCell(a)}</td>
+      <td>${serviceCell(a)}</td>
       <td>${escapeHtml(s.number)}</td>
       <td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td>
       <td>${escapeHtml(s.name || '（削除済み）')}${s.kana ? `<br><small class="muted">${escapeHtml(s.kana)}</small>` : ''}</td>
@@ -1316,8 +1329,6 @@ function renderSettings() {
     <label>雇用保険：週時間（以上）<input type="number" step="0.25" id="set-empInsHours" value="${escapeHtml(s.empInsHours)}"><small>市マニュアル第Ⅶ章2</small></label>
     <label>フル：退職手当への切替（月経過）<input type="number" id="set-taishuMonths" value="${escapeHtml(s.taishuMonths)}"><small>市マニュアル第Ⅶ章2：6月</small></label>
     <label>フル：共済組合への切替（月経過）<input type="number" id="set-kyosaiMonths" value="${escapeHtml(s.kyosaiMonths)}"><small>市マニュアル第Ⅶ章1：12月</small></label>
-    <label class="checkbox-label full"><input type="checkbox" id="set-continuityResetOnPublic" ${s.continuityResetOnPublic !== false ? 'checked' : ''}>
-      公募で採用したとき、継続勤務年数（年休）とフルタイムの継続期間（退手・共済の切替）を数え直す（3年周期の1年目は「任用の日」の年休・共済(短期)・雇用保険）</label>
     <label>健康診断・ストレスチェック：週時間（以上）<input type="number" step="0.25" id="set-healthCheckHours" value="${escapeHtml(s.healthCheckHours)}"><small>市マニュアル第Ⅶ章4</small></label>
     <label>条件付採用期間（月）<input type="number" min="0" id="set-probationMonths" value="${escapeHtml(s.probationMonths)}">
       <small>原文（【国】地方公務員法第22条の2）で確認のうえ設定。0で非表示。</small></label>
@@ -1349,7 +1360,6 @@ function saveSettings() {
     taishuMonths: num('set-taishuMonths') ?? DATA.settings.taishuMonths,
     kyosaiMonths: num('set-kyosaiMonths') ?? DATA.settings.kyosaiMonths,
     healthCheckHours: num('set-healthCheckHours') ?? DATA.settings.healthCheckHours,
-    continuityResetOnPublic: document.getElementById('set-continuityResetOnPublic').checked,
     probationMonths: num('set-probationMonths') || 0,
     expiryAlertDays: num('set-expiryAlertDays') || 60,
     backupReminderDays: num('set-backupReminderDays') || 7,
