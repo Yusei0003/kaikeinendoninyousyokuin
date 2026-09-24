@@ -53,7 +53,7 @@ test('再度の任用の連続回数と上限警告', () => {
   d.appointments.push(appt({ id: 'y3', fiscalYear: 2025, start: '2025-04-01', end: '2026-03-31', recruitMethod: 'reappoint' }));
   const next = appt({ id: 'y4', recruitMethod: 'reappoint' });
   assert.strictEqual(C.consecutiveReappointCount(d, 's1', next), 3);
-  assert.ok(C.validateAppointment(next, d, d.settings).some((i) => i.level === 'warn' && /連続3回目/.test(i.msg)));
+  assert.ok(C.validateAppointment(next, d, d.settings).some((i) => i.level === 'warn' && /4年目の任用/.test(i.msg)));
   // 公募を挟むとリセット
   assert.strictEqual(C.consecutiveReappointCount(d, 's1', appt({ id: 'y4', recruitMethod: 'public' })), 0);
 });
@@ -260,5 +260,28 @@ test('任用一覧の書出し→読込で内容が変わらない', () => {
   for (const k of ['number', 'name', 'type', 'payType', 'start', 'end', 'weeklyHours', 'hoursText', 'baseAmount', 'payAmount', 'socialIns', 'empIns', 'kyosaiSwitch', 'yearInService', 'dept', 'budgetCode']) {
     const byNo = (arr) => arr.map((r) => String(r[k])).sort();
     assert.deepStrictEqual(byNo(again), byNo(parsed), k);
+  }
+});
+
+test('公募が必要な年度：R5.11採用もR5.4採用もR8.4に公募（毎年4月の更新は連続2回まで）', () => {
+  for (const start of ['2023-11-01', '2023-04-01']) {
+    const d = baseData();
+    const first = appt({ id: 'r5', fiscalYear: 2023, start, end: '2024-03-31', recruitMethod: 'public' });
+    d.appointments.push(first);
+    assert.strictEqual(C.publicRecruitFy(d, first, d.settings), 2026, start);
+    let base = first;
+    for (const fy of [2024, 2025]) {
+      d.evaluations.push({ id: `e${fy}`, staffId: 's1', fiscalYear: fy - 1, overall: 'A', recommend: 'yes', wish: 'yes' });
+      const p = C.buildNextYearPlan(d, fy - 1, d.settings)[0];
+      assert.strictEqual(p.recommend, true, `${start} ${fy}`);
+      d.appointments.push(p.draft);
+      base = p.draft;
+    }
+    assert.strictEqual(C.yearInServiceOf(d, base), 3);
+    assert.strictEqual(C.publicRecruitFy(d, base, d.settings), 2026);
+    d.evaluations.push({ id: 'e2025', staffId: 's1', fiscalYear: 2025, overall: 'A', recommend: 'yes', wish: 'yes' });
+    const r8 = C.buildNextYearPlan(d, 2025, d.settings)[0];
+    assert.strictEqual(r8.overLimit, true);
+    assert.ok(r8.reasons.some((x) => /R8\.4\.1に公募が必要/.test(x)));
   }
 });

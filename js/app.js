@@ -249,6 +249,13 @@ function renderHome() {
   ].join('');
   document.querySelectorAll('#home-stats [data-goto]').forEach((b) => (b.onclick = () => window.activateTab(b.dataset.goto)));
 
+  const nextFy = C.fiscalYearOf(t) + 1;
+  const needPublic = DATA.appointments.filter((a) => a.status !== 'canceled' && a.start && C.fiscalYearOf(a.start) === nextFy - 1
+    && C.publicRecruitFy(DATA, a, DATA.settings) === nextFy);
+  document.getElementById('home-public').innerHTML = `<p class="hint">${C.fyLabel(nextFy - 1)}が${Number(DATA.settings.reappointLimit) + 1}年目の職員です。採用月にかかわらず採用した年度を1年目と数え、毎年4月の再度の任用（更新）は連続${DATA.settings.reappointLimit}回までのため、${C.toWarekiShort(C.fiscalYearStart(nextFy))}の任用は公募となります（市マニュアル第Ⅷ章2）。11月の公募職種の決定に使ってください。</p>`
+    + tableHtml(['氏名', '所属', '業務内容', '区分', '採用年度からの年目'], needPublic.map((a) =>
+      `<tr><td>${escapeHtml(staffName(a.staffId))}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td><td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td><td>${C.yearInServiceOf(DATA, a)}年目</td></tr>`),
+    `${C.toWarekiShort(C.fiscalYearStart(nextFy))}に公募が必要な職員はいません。`);
   document.getElementById('home-procedures').innerHTML = tableHtml(
     ['期日', '氏名', '手続き・確認', '根拠'],
     procs.map((p) => `<tr><td>${C.formatDateJa(p.date)}</td><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.what)}</td><td><small class="muted">${escapeHtml(p.basis)}</small></td></tr>`),
@@ -435,7 +442,7 @@ function appointFields() {
     { type: 'heading', label: '職員・任用' },
     { key: 'staffId', label: '職員', type: 'select', options: staffOptions(), required: true },
     { key: 'recruitMethod', label: '採用方法', type: 'select', options: Object.entries(C.RECRUIT_LABEL) },
-    { key: 'yearInService', label: '会計年度（何年目）', type: 'number', hint: '公募から数えた年目。空欄なら任用履歴から自動計算' },
+    { key: 'yearInService', label: '会計年度（何年目）', type: 'number', hint: '採用月にかかわらず採用した年度を1年目と数える（例：R5.11採用→R5が1年目、R8.4に公募）。空欄なら任用履歴から自動計算' },
     { key: 'ukagai', label: '任用伺い 受理済み（○）', type: 'checkbox' },
     { type: 'heading', label: '所属・業務' },
     { key: 'deptCode', label: '所属CD' },
@@ -617,16 +624,24 @@ function filteredAppointments() {
     .sort((x, y) => String(x.a.deptCode || '').localeCompare(String(y.a.deptCode || '')) || String(x.a.dept).localeCompare(String(y.a.dept), 'ja')
       || String(staffName(x.a.staffId)).localeCompare(staffName(y.a.staffId), 'ja'));
 }
+/** 公募が必要になる年度（翌年度なら強調） */
+function publicRecruitCell(a) {
+  const pfy = C.publicRecruitFy(DATA, a, DATA.settings);
+  if (pfy == null) return '<span class="muted">-</span>';
+  const label = C.toWarekiShort(C.fiscalYearStart(pfy)).replace(/\.1$/, '');
+  return pfy <= C.fiscalYearOf(a.start) + 1 ? `<span class="badge warn">${label}</span>` : label;
+}
 function renderAppointments() {
   const rows = filteredAppointments();
   const dash = (v) => (v === '' || v == null ? '<span class="muted">-</span>' : escapeHtml(v));
   document.getElementById('appoint-table').innerHTML = tableHtml(
-    ['伺い', '年目', '職員番号', '区分', '氏名', '所属', '業務内容', '任用期間', '時間/週', '年休', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手', '保育士確認', '状態', '点検', ''],
+    ['伺い', '年目', '公募', '職員番号', '区分', '氏名', '所属', '業務内容', '任用期間', '時間/週', '年休', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手', '保育士確認', '状態', '点検', ''],
     rows.map(({ a, status, issues }) => {
       const s = staffById(a.staffId) || {};
       return `<tr class="${status === 'canceled' ? 'row-muted' : issues.some((i) => i.level === 'error') ? 'row-error' : issues.length ? 'row-warning' : ''}">
       <td>${a.ukagai ? '○' : '<span class="badge warn">未</span>'}</td>
       <td>${C.yearInServiceOf(DATA, a)}</td>
+      <td>${publicRecruitCell(a)}</td>
       <td>${escapeHtml(s.number)}</td>
       <td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td>
       <td>${escapeHtml(s.name || '（削除済み）')}${s.kana ? `<br><small class="muted">${escapeHtml(s.kana)}</small>` : ''}</td>

@@ -192,6 +192,16 @@
     }
     return count;
   }
+  /**
+   * 公募が必要になる会計年度。
+   * 採用月にかかわらず採用した年度を1年目と数え、毎年4月の再度の任用（更新）は連続2回まで。
+   * 例：R5.11採用・R5.4採用とも R5①・R6②・R7③ → R8.4に公募が必要。
+   */
+  function publicRecruitFy(data, appt, settings) {
+    const limit = settings.reappointLimit;
+    if (limit == null || limit === '' || !parseISO(appt.start)) return null;
+    return fiscalYearOf(appt.start) + Number(limit) + 2 - yearInServiceOf(data, appt);
+  }
   /** 公募から数えて何年目（会計年度）の任用か */
   function yearInServiceOf(data, appt) {
     if (Number(appt.yearInService) > 0) return Number(appt.yearInService);
@@ -406,7 +416,7 @@
     if (appt.staffId && appt.recruitMethod === 'reappoint' && limit != null && limit !== '' && s) {
       const n = consecutiveReappointCount(data, appt.staffId, appt);
       if (n > Number(limit)) {
-        warn(`公募によらない再度の任用が連続${n}回目（${n + 1}年目）です（上限：連続${limit}回・最長${Number(limit) + 1}会計年度）。原則として公募が必要です。`, MAN('第Ⅷ章2'));
+        warn(`${n + 1}年目の任用です。公募によらない再度の任用（毎年4月の更新）は連続${limit}回・最長${Number(limit) + 1}会計年度までのため、原則として公募が必要です。`, MAN('第Ⅷ章2'));
       }
     }
     return issues;
@@ -538,7 +548,7 @@
       const n = draft.yearInService - 1;
       const limit = settings.reappointLimit;
       const overLimit = limit != null && limit !== '' && n > Number(limit);
-      if (overLimit) { recommend = false; reasons.push(`${draft.yearInService}年目となり、公募によらない再度の任用の上限（連続${limit}回）を超える → 公募が必要`); }
+      if (overLimit) { recommend = false; reasons.push(`${fyLabel(nextFy)}は${draft.yearInService}年目となり、公募によらない再度の任用（毎年4月の更新）の上限（連続${limit}回・${Number(limit) + 1}会計年度）を超える → ${toWarekiShort(fiscalYearStart(nextFy))}に公募が必要`); }
       plans.push({ staffId, base, draft, evaluation: ev, recommend, reasons, already, reappointCount: n, overLimit });
     }
     return plans;
@@ -1034,7 +1044,7 @@
     toISO, parseISO, diffDays, addDaysISO, addMonthsISO, fiscalYearOf, fiscalYearStart, fiscalYearEnd,
     warekiYear, fyLabel, formatDateJa, uid,
     emptyData, normalizeData,
-    appointmentsOfStaff, probationEnd, consecutiveReappointCount, yearInServiceOf, validateAppointment, validateRenewal,
+    appointmentsOfStaff, probationEnd, consecutiveReappointCount, yearInServiceOf, publicRecruitFy, validateAppointment, validateRenewal,
     kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
     fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
