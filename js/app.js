@@ -121,6 +121,7 @@ function closeModal() {
  */
 function openForm(title, fields, values, onSubmit, { wide, before = '', after = '', submitLabel = '保存する' } = {}) {
   const inputs = fields.map((f) => {
+    if (f.type === 'heading') return `<h4 class="form-heading">${escapeHtml(f.label)}</h4>`;
     const v = values[f.key] == null ? '' : values[f.key];
     const id = `f-${f.key}`;
     const req = f.required ? ' required' : '';
@@ -144,6 +145,7 @@ function openForm(title, fields, values, onSubmit, { wide, before = '', after = 
   const collect = () => {
     const out = {};
     for (const f of fields) {
+      if (f.type === 'heading') continue;
       const el = document.getElementById(`f-${f.key}`);
       if (f.type === 'checkbox') out[f.key] = el.checked;
       else if (f.type === 'number') out[f.key] = el.value === '' ? '' : Number(el.value);
@@ -195,40 +197,81 @@ function initFiscalYearPicker() {
 /* ------------------------------------------------------------
  * ホーム
  * ------------------------------------------------------------ */
+/** 申送事項（総務課職員係）の年間スケジュール。month は該当月（1〜12） */
+const YEARLY_SCHEDULE = [
+  { month: 4, text: '退職者の社会保険等の喪失手続き（共済組合・厚生年金・雇用保険・総合事務組合）／新規採用者の資格取得手続き（共済短期・厚生年金・雇用保険）' },
+  { month: 6, text: '雇用保険料・労働保険料の申告・支払（電子申請）' },
+  { month: 7, text: '被保険者報酬月額算定基礎届・賞与支払届の提出' },
+  { month: 9, text: '算定基礎届に基づく標準報酬月額の変更（人事システムの保険情報へ反映）' },
+  { month: 10, text: '雇用保険から退職手当制度への切替（4/1採用のフルタイム1年目：6月経過）' },
+  { month: 11, text: '任用希望調査（各課の新規需要の把握）／公募職種及び勤務条件の決定' },
+  { month: 12, text: '求人申込書等の提出依頼・公募関係書類作成' },
+  { month: 1, text: '再度の任用に関する通知（人事評価の結果・本人の希望による）／募集期間・公募（HP・区長文書・ハローワーク）' },
+  { month: 2, text: '選考（書類審査・面接）、合否結果通知、採用手続書類の提出依頼' },
+  { month: 3, text: '給料（報酬）額決定、翌年度の任用に関する通知（任用一覧の作成）、各課の任用起案の合議' },
+];
+/** 今後の手続き（切替時期・伺い・保育士確認） */
+function upcomingProcedures(t, days) {
+  const out = [];
+  const limit = C.addDaysISO(t, days);
+  for (const a of DATA.appointments) {
+    if (a.status === 'canceled' || !a.start || a.end < t) continue;
+    const name = staffName(a.staffId);
+    const sw = C.fullTimeSwitchDates(DATA, a, DATA.settings);
+    if (sw) {
+      if (sw.taishu > t && sw.taishu <= limit && sw.taishu <= a.end) out.push({ date: sw.taishu, name, what: '雇用保険→退職手当の切替（フルタイム6月経過）', basis: '市マニュアル第Ⅶ章2' });
+      if (sw.kyosai > t && sw.kyosai <= limit && sw.kyosai <= C.addDaysISO(a.end, 1)) out.push({ date: sw.kyosai, name, what: '共済組合（短期）→共済組合への切替（フルタイム12月経過）', basis: '市マニュアル第Ⅶ章1' });
+    }
+    if (a.start >= t && a.start <= limit && !a.ukagai) out.push({ date: a.start, name, what: `任用伺いが未受理（${a.dept} ${a.title}）`, basis: '申送事項（3月下旬 任用起案）' });
+    if (/保育士/.test(a.title || '') && String(a.hoikushiCheck || '') !== '済') out.push({ date: a.start, name, what: '保育士特定登録取消者管理システムの確認が未済', basis: '任用一覧の確認項目' });
+  }
+  return out.sort((x, y) => x.date.localeCompare(y.date));
+}
 function renderHome() {
   const t = todayISO();
   const fy = currentFy();
   const statuses = DATA.appointments.map((a) => C.appointmentStatus(a, t));
   const active = statuses.filter((s) => s === 'active').length;
   const planned = statuses.filter((s) => s === 'planned').length;
-  const issueCount = DATA.appointments.filter((a) => a.status !== 'canceled' && C.validateAppointment(a, DATA, DATA.settings).length).length;
+  const issueCount = DATA.appointments.filter((a) => a.status !== 'canceled' && a.start && C.fiscalYearOf(a.start) === fy && C.validateAppointment(a, DATA, DATA.settings).length).length;
   const missing = C.missingEvaluations(DATA, fy);
   const openExams = DATA.exams.filter((e) => e.status !== 'closed');
+  const procs = upcomingProcedures(t, 90);
   const stat = (label, value, tab, tone) =>
     `<button class="stat ${tone || ''}" data-goto="${tab}"><span class="stat-value">${value}</span><span class="stat-label">${label}</span></button>`;
   document.getElementById('home-stats').innerHTML = [
     stat('本日在職中', `${active}人`, 'appoint'),
     stat('任用予定', `${planned}件`, 'appoint'),
-    stat('要確認の任用', `${issueCount}件`, 'appoint', issueCount ? 'warn' : ''),
+    stat(`${C.fyLabel(fy)} 要確認の任用`, `${issueCount}件`, 'appoint', issueCount ? 'warn' : ''),
     stat(`${C.fyLabel(fy)} 評価未入力`, `${missing.length}人`, 'eval', missing.length ? 'warn' : ''),
+    stat('90日以内の手続き', `${procs.length}件`, 'home', procs.length ? 'warn' : ''),
     stat('実施中の試験', `${openExams.length}件`, 'exam'),
-    stat('職員台帳', `${DATA.staff.length}人`, 'staff'),
   ].join('');
   document.querySelectorAll('#home-stats [data-goto]').forEach((b) => (b.onclick = () => window.activateTab(b.dataset.goto)));
 
+  document.getElementById('home-procedures').innerHTML = tableHtml(
+    ['期日', '氏名', '手続き・確認', '根拠'],
+    procs.map((p) => `<tr><td>${C.formatDateJa(p.date)}</td><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.what)}</td><td><small class="muted">${escapeHtml(p.basis)}</small></td></tr>`),
+    '90日以内に予定されている手続きはありません。',
+  );
+  const month = Number(t.slice(5, 7));
+  const order = [...YEARLY_SCHEDULE].sort((a, b) => ((a.month - month + 12) % 12) - ((b.month - month + 12) % 12));
+  document.getElementById('home-schedule').innerHTML = `<ul class="schedule">${order.map((s) =>
+    `<li class="${s.month === month ? 'now' : ''}"><span class="month">${s.month}月</span>${escapeHtml(s.text)}</li>`).join('')}</ul>`;
+
   const exp = C.expiringAppointments(DATA, t, Number(DATA.settings.expiryAlertDays) || 60);
   document.getElementById('home-expiring').innerHTML = tableHtml(
-    ['氏名', '所属', '職名', '任期', '残り日数', '次年度'],
+    ['氏名', '所属', '業務内容', '任期', '残り日数', '次年度'],
     exp.map(({ appt, daysLeft }) => {
       const nextFy = C.fiscalYearOf(appt.start) + 1;
       const hasNext = DATA.appointments.some((a) => a.staffId === appt.staffId && a.status !== 'canceled' && C.fiscalYearOf(a.start) === nextFy);
       return `<tr><td>${escapeHtml(staffName(appt.staffId))}</td><td>${escapeHtml(appt.dept)}</td><td>${escapeHtml(appt.title)}</td>
-        <td>${appt.start}〜${appt.end}</td><td>${daysLeft}日</td><td>${hasNext ? '登録済み' : '<span class="badge warn">未登録</span>'}</td></tr>`;
+        <td>${appt.start}〜${appt.end}</td><td>${daysLeft}日</td><td>${hasNext ? '登録済み' : '<span class="badge warn">未登録（任期満了退職の確認）</span>'}</td></tr>`;
     }),
     '任期満了が近い職員はいません。',
   );
   document.getElementById('home-missing-eval').innerHTML = tableHtml(
-    ['氏名', '所属', '職名', '任期'],
+    ['氏名', '所属', '業務内容', '任期'],
     missing.map((a) => `<tr><td>${escapeHtml(staffName(a.staffId))}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td><td>${a.start}〜${a.end}</td></tr>`),
     '未入力の職員はいません。',
   );
@@ -242,7 +285,6 @@ function renderHome() {
     '実施中の試験はありません。',
   );
 }
-
 /* ------------------------------------------------------------
  * バックアップ警告
  * ------------------------------------------------------------ */
@@ -354,16 +396,16 @@ function openStaffDetail(staffId) {
       <dt>性別</dt><dd>${GENDER_LABEL[s.gender || ''] || '—'}</dd>
       <dt>生年月日</dt><dd>${s.birth ? C.formatDateJa(s.birth) : '—'}</dd>
       <dt>連絡先</dt><dd>${escapeHtml(s.phone) || '—'}</dd>
-      <dt>公募によらない再度の任用</dt><dd>直近の任用時点で連続${reappointNow}回</dd>
+      <dt>公募によらない再度の任用</dt><dd>直近の任用時点で連続${reappointNow}回（${reappointNow + 1}年目）</dd>
     </dl>
     <h4>任用履歴</h4>
-    ${tableHtml(['年度', '任期', '所属・職名', '区分', '採用方法', '状態'], appts.map((a) =>
-      `<tr><td>${C.fyLabel(C.fiscalYearOf(a.start))}</td><td>${a.start}〜${a.end}</td><td>${escapeHtml(a.dept)} ${escapeHtml(a.title)}</td>
-       <td>${C.APPOINT_TYPE_SHORT[a.type] || ''}</td><td>${C.RECRUIT_LABEL[a.recruitMethod] || ''}</td><td>${C.STATUS_LABEL[C.appointmentStatus(a, t)]}</td></tr>`), '任用の記録はありません。')}
+    ${tableHtml(['年度', '年目', '任期', '所属・業務内容', '区分', '給料・報酬', '採用方法', '状態'], appts.map((a) =>
+      `<tr><td>${C.fyLabel(C.fiscalYearOf(a.start))}</td><td>${C.yearInServiceOf(DATA, a)}</td><td>${a.start}〜${a.end}</td><td>${escapeHtml(a.dept)} ${escapeHtml(a.title)}</td>
+       <td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td><td>${yen(a.payAmount)}</td><td>${C.RECRUIT_LABEL[a.recruitMethod] || ''}</td><td>${C.STATUS_LABEL[C.appointmentStatus(a, t)]}</td></tr>`), '任用の記録はありません。')}
     <h4>人事評価</h4>
-    ${tableHtml(['年度', ...DATA.settings.evalItems, '総合', '所見（任用）', '評価者'], evs.map((e) =>
+    ${tableHtml(['年度', ...DATA.settings.evalItems, '総合', '所見（任用）', '本人の希望', '評価者'], evs.map((e) =>
       `<tr><td>${C.fyLabel(Number(e.fiscalYear))}</td>${DATA.settings.evalItems.map((it) => `<td>${escapeHtml((e.items || {})[it] || '')}</td>`).join('')}
-       <td>${escapeHtml(e.overall)}</td><td>${C.RECOMMEND_LABEL[e.recommend || '']}</td><td>${escapeHtml(e.evaluator)}</td></tr>`), '評価の記録はありません。')}
+       <td>${escapeHtml(e.overall)}</td><td>${C.RECOMMEND_LABEL[e.recommend || '']}</td><td>${C.WISH_LABEL[e.wish || '']}</td><td>${escapeHtml(e.evaluator)}</td></tr>`), '評価の記録はありません。')}
     <h4>採用試験の応募歴</h4>
     ${tableHtml(['試験', '結果'], apps.map((a) => {
       const ex = DATA.exams.find((x) => x.id === a.examId);
@@ -382,38 +424,111 @@ function staffOptions(includeBlank = true) {
   const list = DATA.staff.slice().sort((a, b) => String(a.kana || a.name).localeCompare(String(b.kana || b.name), 'ja'));
   return (includeBlank ? [['', '選択してください']] : []).concat(list.map((s) => [s.id, `${s.name}${s.number ? `（${s.number}）` : ''}`]));
 }
+const KUBUN_OPTIONS = Object.entries(C.KUBUN_LABEL);
+const INS_SOCIAL_OPTIONS = [['', '未記入'], ['共済', '共済'], ['共済(短期)', '共済(短期)'], ['無', '無']];
+const INS_EMP_OPTIONS = [['', '未記入'], ['雇用保険', '雇用保険'], ['退手', '退手'], ['無', '無']];
+const UMU_OPTIONS = [['', '未記入'], ['有', '有'], ['無', '無']];
+const CHECK_OPTIONS = [['', '未記入'], ['済', '済'], ['未', '未'], ['-', '-（対象外）']];
+
 function appointFields() {
   return [
+    { type: 'heading', label: '職員・任用' },
     { key: 'staffId', label: '職員', type: 'select', options: staffOptions(), required: true },
     { key: 'recruitMethod', label: '採用方法', type: 'select', options: Object.entries(C.RECRUIT_LABEL) },
-    { key: 'dept', label: '所属（課）', required: true },
-    { key: 'section', label: '係' },
-    { key: 'title', label: '職名・業務', required: true },
-    { key: 'type', label: '区分', type: 'select', options: Object.entries(C.APPOINT_TYPE_LABEL) },
-    { key: 'start', label: '任期の開始日', type: 'date', required: true },
-    { key: 'end', label: '任期の終了日', type: 'date', required: true, hint: '開始日の属する会計年度の3月31日まで' },
-    { key: 'weeklyHours', label: '1週間当たりの勤務時間', type: 'number', step: '0.25', required: true, hint: `フルタイムは常勤と同一（設定値：${DATA.settings.fullTimeWeeklyHours}時間）` },
-    { key: 'payType', label: '報酬の区分', type: 'select', options: Object.entries(C.PAY_TYPE_LABEL) },
-    { key: 'payAmount', label: '報酬（給料）額（円）', type: 'number', hint: '【市】会計年度任用職員の給与等に関する条例・規則に基づく額' },
+    { key: 'yearInService', label: '会計年度（何年目）', type: 'number', hint: '公募から数えた年目。空欄なら任用履歴から自動計算' },
+    { key: 'ukagai', label: '任用伺い 受理済み（○）', type: 'checkbox' },
+    { type: 'heading', label: '所属・業務' },
+    { key: 'deptCode', label: '所属CD' },
+    { key: 'dept', label: '所属名', required: true },
+    { key: 'workplace', label: '就業場所' },
+    { key: 'title', label: '業務内容', required: true, placeholder: '例：保育士、事務補助員' },
+    { key: 'account', label: '会計' },
+    { key: 'budgetCode', label: '予算科目' },
+    { type: 'heading', label: '任用期間・勤務時間' },
+    { key: 'kubun', label: '区分', type: 'select', options: KUBUN_OPTIONS },
+    { key: 'start', label: '任用期間（開始）', type: 'date', required: true },
+    { key: 'end', label: '任用期間（終了）', type: 'date', required: true, hint: '開始日の属する会計年度の3月31日まで' },
+    { key: 'weeklyHours', label: '勤務時間/週（時間）', type: 'number', step: '0.25', hint: `フルは${DATA.settings.fullTimeWeeklyHours}時間。日額・時間額で定まらない場合は空欄` },
+    { key: 'hoursText', label: '勤務時間の記載（週時間が空欄のとき）', placeholder: '例：随時' },
+    { key: 'annualLeave', label: '年休（日数）', type: 'number' },
+    { type: 'heading', label: '給料・報酬・手当' },
+    { key: 'baseAmount', label: '基礎額（円）', type: 'number' },
+    { key: 'payAmount', label: '給料・報酬額（円）', type: 'number', hint: '月額・日額・時間額（区分による）' },
+    { key: 'payDay', label: '給料・報酬支給日', placeholder: '毎月21日／翌月21日' },
+    { key: 'bonus', label: '期末手当 支給の有無', type: 'select', options: UMU_OPTIONS },
+    { key: 'commuteDay', label: '通勤手当支給日', placeholder: '毎月21日／翌月21日' },
+    { type: 'heading', label: '社会保険・雇用保険・確認事項' },
+    { key: 'socialIns', label: '社会保険（4/1時点）', type: 'select', options: INS_SOCIAL_OPTIONS },
+    { key: 'kyosaiSwitch', label: '健保→共済 切替時期', placeholder: '例：4/1' },
+    { key: 'empIns', label: '雇保／退手（4/1時点）', type: 'select', options: INS_EMP_OPTIONS },
+    { key: 'taishuSwitch', label: '雇保→退手 切替時期', placeholder: '例：10/1' },
+    { key: 'hoikushiCheck', label: '保育士特定登録取消者管理システム', type: 'select', options: CHECK_OPTIONS },
     { key: 'note', label: '備考', type: 'textarea', full: true },
     { key: 'canceled', label: 'この任用を取り消す（記録は残す）', type: 'checkbox', full: true },
   ];
+}
+/** フォームの値から任用レコードを組み立てる */
+function appointFromForm(v, base) {
+  const rec = { ...(base || { id: C.uid('ap'), renewals: [], createdAt: new Date().toISOString() }), ...v };
+  C.applyKubun(rec, v.kubun);
+  delete rec.kubun;
+  rec.fiscalYear = v.start ? C.fiscalYearOf(v.start) : '';
+  rec.status = v.canceled ? 'canceled' : '';
+  delete rec.canceled;
+  return rec;
+}
+/** 市マニュアルに基づく判定結果（フォーム下部に表示） */
+function judgeAppointment(rec) {
+  const s = DATA.settings;
+  const tmp = { ...DATA, appointments: DATA.appointments.filter((a) => a.id !== rec.id).concat([rec]) };
+  const calc = C.calcPay(rec, s);
+  const bonus = C.bonusEligibility(rec, s);
+  const soc = rec.staffId ? C.suggestSocialIns(tmp, rec, s) : null;
+  const emp = rec.staffId ? C.suggestEmpIns(tmp, rec, s) : null;
+  const sw = rec.staffId ? C.fullTimeSwitchDates(tmp, rec, s) : null;
+  const md = (iso) => { const d = C.parseISO(iso); return d ? `${d.getMonth() + 1}/${d.getDate()}` : ''; };
+  return {
+    payAmount: calc,
+    payDay: C.expectedPayDay(rec),
+    commuteDay: C.expectedPayDay(rec),
+    bonus,
+    socialIns: soc ? soc.value : null,
+    socialNote: soc && !soc.sure ? soc.note : '',
+    empIns: emp ? emp.value : null,
+    kyosaiSwitch: sw ? md(sw.kyosai) : null,
+    taishuSwitch: sw ? md(sw.taishu) : null,
+    sw,
+    health: C.healthCheckRequired(rec, s),
+    year: rec.staffId ? C.yearInServiceOf(tmp, rec) : null,
+  };
+}
+function judgeHtml(j) {
+  const v = (x, unit = '') => (x == null || x === '' ? '<span class="muted">判定不可（入力不足）</span>' : `<strong>${escapeHtml(typeof x === 'number' ? x.toLocaleString('ja-JP') : x)}${unit}</strong>`);
+  return `<div class="judge-box"><h4>市マニュアルによる判定</h4><dl class="kv">
+    <dt>給料・報酬額（算定式）</dt><dd>${v(j.payAmount, '円')} <small class="muted">第Ⅲ章</small></dd>
+    <dt>給料・報酬／通勤手当の支給日</dt><dd>${v(j.payDay)} <small class="muted">第Ⅲ章3</small></dd>
+    <dt>期末手当</dt><dd>${v(j.bonus)} <small class="muted">第Ⅳ章10（6か月以上かつ週15.5時間以上）</small></dd>
+    <dt>社会保険（任用開始時）</dt><dd>${v(j.socialIns)} ${j.socialNote ? `<small class="warn-text">${escapeHtml(j.socialNote)}</small>` : ''} <small class="muted">第Ⅶ章1</small></dd>
+    <dt>雇保／退手（任用開始時）</dt><dd>${v(j.empIns)} <small class="muted">第Ⅶ章2</small></dd>
+    ${j.sw ? `<dt>フルタイム継続開始日</dt><dd>${j.sw.serviceStart}${j.sw.estimated ? '（年目から推定）' : ''}</dd>
+      <dt>雇保→退手 切替</dt><dd><strong>${j.sw.taishu}</strong> <small class="muted">6月経過</small></dd>
+      <dt>健保→共済 切替</dt><dd><strong>${j.sw.kyosai}</strong> <small class="muted">12月経過</small></dd>` : ''}
+    <dt>健康診断・ストレスチェック</dt><dd>${j.health ? '<strong>対象</strong>' : '対象外'} <small class="muted">第Ⅶ章4（任用1年かつ週29時間以上）</small></dd>
+    <dt>会計年度（何年目）</dt><dd>${j.year ? `${j.year}年目` : '—'}</dd>
+  </dl>
+  <button type="button" class="btn-secondary" id="judge-apply">判定結果を入力欄に反映</button>
+  <small class="muted">（給料・報酬額、支給日、期末手当、社会保険、雇保/退手、切替時期を上書きします）</small></div>`;
 }
 function openAppointForm(appt, preset = {}) {
   if (!DATA.staff.length) { alert('先に職員台帳に職員を登録してください。'); return; }
   const isNew = !appt;
   const fy = currentFy();
-  const values = appt ? { ...appt, canceled: appt.status === 'canceled' } : {
-    recruitMethod: 'public', type: 'part', start: C.fiscalYearStart(fy), end: C.fiscalYearEnd(fy), payType: 'hourly', ...preset,
+  const { onSaved, ...presetValues } = preset;
+  const values = appt ? { ...appt, kubun: C.kubunOf(appt), canceled: appt.status === 'canceled' } : {
+    recruitMethod: 'public', kubun: 'part_monthly', start: C.fiscalYearStart(fy), end: C.fiscalYearEnd(fy), ...presetValues,
   };
   const trySave = (v, force) => {
-    const rec = {
-      ...(appt || { id: C.uid('ap'), renewals: [], createdAt: new Date().toISOString() }),
-      ...v,
-      fiscalYear: v.start ? C.fiscalYearOf(v.start) : '',
-      status: v.canceled ? 'canceled' : '',
-    };
-    delete rec.canceled;
+    const rec = appointFromForm(v, appt);
     const issues = C.validateAppointment(rec, DATA, DATA.settings);
     const errors = issues.filter((i) => i.level === 'error');
     if (errors.length && !rec.status) return issuesHtml(issues);
@@ -424,7 +539,7 @@ function openAppointForm(appt, preset = {}) {
     }
     if (isNew) DATA.appointments.push(rec);
     else Object.assign(appt, rec);
-    if (preset.onSaved) preset.onSaved(rec);
+    if (onSaved) onSaved(rec);
     saveData();
     showToast(isNew ? '任用を登録しました。' : '任用を更新しました。');
     return undefined;
@@ -438,12 +553,35 @@ function openAppointForm(appt, preset = {}) {
       });
     }
     return res;
-  }, { wide: true });
-  // 勤務時間からフル／パートを自動選択
+  }, { wide: true, after: '<div id="judge-area"></div>' });
+
+  const refreshJudge = () => {
+    const rec = appointFromForm(form.collect(), appt);
+    const j = judgeAppointment(rec);
+    document.getElementById('judge-area').innerHTML = judgeHtml(j);
+    document.getElementById('judge-apply').onclick = () => {
+      const set = (key, val) => { if (val != null && val !== '') document.getElementById(`f-${key}`).value = val; };
+      set('payAmount', j.payAmount);
+      set('payDay', j.payDay);
+      set('commuteDay', j.commuteDay);
+      set('bonus', j.bonus);
+      set('socialIns', j.socialIns);
+      set('empIns', j.empIns);
+      document.getElementById('f-kyosaiSwitch').value = j.kyosaiSwitch || '';
+      document.getElementById('f-taishuSwitch').value = j.taishuSwitch || '';
+      refreshJudge();
+    };
+  };
+  document.getElementById('modal-form').addEventListener('change', refreshJudge);
+  refreshJudge();
+  // 勤務時間38.75ならフルに合わせる
   const hoursEl = document.getElementById('f-weeklyHours');
   hoursEl.addEventListener('change', () => {
     const h = Number(hoursEl.value);
-    if (h > 0) document.getElementById('f-type').value = h === Number(DATA.settings.fullTimeWeeklyHours) ? 'full' : 'part';
+    const k = document.getElementById('f-kubun');
+    if (h > 0 && h === Number(DATA.settings.fullTimeWeeklyHours)) k.value = 'full';
+    else if (h > 0 && k.value === 'full') k.value = 'part_monthly';
+    refreshJudge();
   });
 }
 function openRenewForm(appt) {
@@ -475,23 +613,40 @@ function filteredAppointments() {
     .map((a) => ({ a, status: C.appointmentStatus(a, t), issues: a.status === 'canceled' ? [] : C.validateAppointment(a, DATA, DATA.settings) }))
     .filter((x) => !st || x.status === st)
     .filter((x) => !issueOnly || x.issues.length)
-    .filter((x) => !q || [staffName(x.a.staffId), x.a.dept, x.a.section, x.a.title].some((s) => String(s || '').includes(q)))
-    .sort((x, y) => String(x.a.dept).localeCompare(String(y.a.dept), 'ja') || String(staffName(x.a.staffId)).localeCompare(staffName(y.a.staffId), 'ja'));
+    .filter((x) => !q || [staffName(x.a.staffId), (staffById(x.a.staffId) || {}).number, x.a.dept, x.a.workplace, x.a.title].some((s) => String(s || '').includes(q)))
+    .sort((x, y) => String(x.a.deptCode || '').localeCompare(String(y.a.deptCode || '')) || String(x.a.dept).localeCompare(String(y.a.dept), 'ja')
+      || String(staffName(x.a.staffId)).localeCompare(staffName(y.a.staffId), 'ja'));
 }
 function renderAppointments() {
   const rows = filteredAppointments();
+  const dash = (v) => (v === '' || v == null ? '<span class="muted">-</span>' : escapeHtml(v));
   document.getElementById('appoint-table').innerHTML = tableHtml(
-    ['氏名', '所属', '職名', '区分', '任期', '週時間', '報酬', '採用方法', '状態', '点検', ''],
-    rows.map(({ a, status, issues }) => `<tr class="${status === 'canceled' ? 'row-muted' : issues.some((i) => i.level === 'error') ? 'row-error' : issues.length ? 'row-warning' : ''}">
-      <td>${escapeHtml(staffName(a.staffId))}</td><td>${escapeHtml(a.dept)}${a.section ? `<br><small>${escapeHtml(a.section)}</small>` : ''}</td><td>${escapeHtml(a.title)}</td>
-      <td>${C.APPOINT_TYPE_SHORT[a.type] || ''}</td>
-      <td>${a.start}〜${a.end}${(a.renewals || []).length ? `<br><small>更新${a.renewals.length}回</small>` : ''}</td>
-      <td>${a.weeklyHours || ''}h</td><td>${C.PAY_TYPE_LABEL[a.payType] || ''} ${yen(a.payAmount)}</td>
-      <td>${a.recruitMethod === 'reappoint' ? '再度の任用' : '公募'}</td><td>${C.STATUS_LABEL[status]}</td>
-      <td>${issueBadges(issues)}${issuesHtml(issues)}</td>
+    ['伺い', '年目', '職員番号', '区分', '氏名', '所属', '業務内容', '任用期間', '時間/週', '年休', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手', '保育士確認', '状態', '点検', ''],
+    rows.map(({ a, status, issues }) => {
+      const s = staffById(a.staffId) || {};
+      return `<tr class="${status === 'canceled' ? 'row-muted' : issues.some((i) => i.level === 'error') ? 'row-error' : issues.length ? 'row-warning' : ''}">
+      <td>${a.ukagai ? '○' : '<span class="badge warn">未</span>'}</td>
+      <td>${C.yearInServiceOf(DATA, a)}</td>
+      <td>${escapeHtml(s.number)}</td>
+      <td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td>
+      <td>${escapeHtml(s.name || '（削除済み）')}${s.kana ? `<br><small class="muted">${escapeHtml(s.kana)}</small>` : ''}</td>
+      <td>${escapeHtml(a.dept)}${a.workplace && a.workplace !== a.dept ? `<br><small>${escapeHtml(a.workplace)}</small>` : ''}</td>
+      <td>${escapeHtml(a.title)}</td>
+      <td>${C.toWarekiShort(a.start)}～${C.toWarekiShort(a.end)}${(a.renewals || []).length ? `<br><small>更新${a.renewals.length}回</small>` : ''}</td>
+      <td>${C.hoursOf(a) != null ? C.hoursOf(a) : dash(a.hoursText)}</td>
+      <td>${dash(a.annualLeave)}</td>
+      <td class="num">${a.baseAmount ? Number(a.baseAmount).toLocaleString('ja-JP') : dash('')}</td>
+      <td class="num">${C.PAY_TYPE_LABEL[a.payType] || ''} ${a.payAmount ? Number(a.payAmount).toLocaleString('ja-JP') : ''}</td>
+      <td>${dash(a.bonus)}</td>
+      <td>${dash(a.socialIns)}${a.kyosaiSwitch ? `<br><small>→共済 ${escapeHtml(a.kyosaiSwitch)}</small>` : ''}</td>
+      <td>${dash(a.empIns)}${a.taishuSwitch ? `<br><small>→退手 ${escapeHtml(a.taishuSwitch)}</small>` : ''}</td>
+      <td>${dash(a.hoikushiCheck)}</td>
+      <td>${C.STATUS_LABEL[status]}</td>
+      <td class="issues-cell">${issueBadges(issues)}${issuesHtml(issues)}</td>
       <td class="actions"><button class="btn-small" data-edit="${a.id}">編集</button>
         ${status !== 'canceled' ? `<button class="btn-small" data-renew="${a.id}">任期更新</button><button class="btn-small" data-print="${a.id}">明示書</button>` : ''}
-        <button class="btn-danger" data-del="${a.id}">削除</button></td></tr>`),
+        <button class="btn-danger" data-del="${a.id}">削除</button></td></tr>`;
+    }),
     `${C.fyLabel(currentFy())}の任用はありません。`,
   );
   const tbl = document.getElementById('appoint-table');
@@ -506,30 +661,18 @@ function renderAppointments() {
     saveData();
   }));
 }
-function appointmentSheetRows(list) {
-  const rows = [['職員番号', '氏名', '年度', '所属', '係', '職名', '区分', '任期（自）', '任期（至）', '週勤務時間', '報酬区分', '報酬額', '採用方法', '更新回数', '状態', '備考']];
-  const t = todayISO();
-  for (const a of list) {
-    const s = staffById(a.staffId) || {};
-    rows.push([s.number || '', s.name || '', C.fyLabel(C.fiscalYearOf(a.start)), a.dept, a.section || '', a.title,
-      a.type === 'full' ? 'フルタイム' : 'パートタイム', a.start, a.end, a.weeklyHours, C.PAY_TYPE_LABEL[a.payType] || '', a.payAmount,
-      a.recruitMethod === 'reappoint' ? '再度の任用' : '公募', (a.renewals || []).length, C.STATUS_LABEL[C.appointmentStatus(a, t)], a.note || '']);
-  }
-  return rows;
-}
-
-/* 次年度の任用案 */
 function openNextYearPlan() {
   const fy = currentFy();
   const plans = C.buildNextYearPlan(DATA, fy, DATA.settings);
   if (!plans.length) { alert(`${C.fyLabel(fy)}の任用がありません。`); return; }
-  const body = `<p class="hint">${C.fyLabel(fy)}の任用と人事評価をもとに、${C.fyLabel(fy + 1)}の「再度の任用」案を作ります。推薦となった職員には最初からチェックが入っています。登録後は「任用管理」で個別に修正できます。</p>
-    ${tableHtml(['登録', '氏名', '所属・職名', `${C.fyLabel(fy)}の評価`, '再度の任用', '判定'], plans.map((p, i) => `<tr class="${p.recommend ? '' : 'row-warning'}">
+  const body = `<p class="hint">${C.fyLabel(fy)}の任用・人事評価・本人の希望をもとに、${C.fyLabel(fy + 1)}の「再度の任用」案を作ります（市マニュアル第Ⅷ章2：人事評価の結果に基づき判断、公募によらない再度の任用は原則連続2回・最長3会計年度まで）。推薦となった職員には最初からチェックが入っています。登録後は「任用管理」で個別に修正し、年休・保険・切替時期などを確認してください。</p>
+    ${tableHtml(['登録', '氏名', '所属・業務内容', `${C.fyLabel(fy)}の評価`, '本人の希望', `${C.fyLabel(fy + 1)}`, '判定'], plans.map((p, i) => `<tr class="${p.recommend ? '' : 'row-warning'}">
       <td><input type="checkbox" data-plan="${i}" ${p.recommend ? 'checked' : ''} ${p.already ? 'disabled' : ''}></td>
       <td>${escapeHtml(staffName(p.staffId))}</td><td>${escapeHtml(p.base.dept)} ${escapeHtml(p.base.title)}</td>
       <td>${p.evaluation ? `${escapeHtml(p.evaluation.overall || '—')}／${C.RECOMMEND_LABEL[p.evaluation.recommend || '']}` : '未入力'}</td>
-      <td>連続${p.reappointCount}回目</td>
-      <td>${p.recommend ? '<span class="badge ok">推薦</span>' : `<span class="badge warn">要検討</span><br><small>${p.reasons.map(escapeHtml).join('<br>')}</small>`}</td></tr>`))}
+      <td>${p.evaluation ? C.WISH_LABEL[p.evaluation.wish || ''] : '—'}</td>
+      <td>${p.draft.yearInService}年目</td>
+      <td>${p.recommend ? '<span class="badge ok">推薦</span>' : '<span class="badge warn">要検討</span>'}${p.reasons.length ? `<br><small>${p.reasons.map(escapeHtml).join('<br>')}</small>` : ''}</td></tr>`))}
     <div class="row-actions end"><button class="btn-secondary" id="plan-cancel">閉じる</button><button class="btn-primary" id="plan-save">チェックした任用案を登録</button></div>`;
   openModal(`${C.fyLabel(fy + 1)}の任用案`, body, { wide: true });
   document.getElementById('plan-cancel').onclick = closeModal;
@@ -539,11 +682,10 @@ function openNextYearPlan() {
     for (const p of picked) DATA.appointments.push(p.draft);
     closeModal();
     saveData();
+    initFiscalYearPicker();
     showToast(`${picked.length}件の任用案を登録しました（${C.fyLabel(fy + 1)}）。`);
   };
 }
-
-/* 任期等の明示書（印刷） */
 function printConditions(appt) {
   const s = staffById(appt.staffId) || {};
   const set = DATA.settings;
@@ -589,10 +731,11 @@ function renderEvaluations() {
     .filter((x) => !missingOnly || !x.ev)
     .sort((x, y) => String(x.a.dept).localeCompare(String(y.a.dept), 'ja'));
   document.getElementById('eval-table').innerHTML = tableHtml(
-    ['氏名', '所属・職名', ...items.map(escapeHtml), '総合', '所見（任用）', '評価者', '評価日', ''],
-    rows.map(({ a, ev }) => `<tr class="${ev ? '' : 'row-warning'}"><td>${escapeHtml(staffName(a.staffId))}</td><td>${escapeHtml(a.dept)} ${escapeHtml(a.title)}</td>
+    ['氏名', '所属・業務内容', '年目', ...items.map(escapeHtml), '総合', '所見（任用）', '本人の希望', '評価者', '評価日', ''],
+    rows.map(({ a, ev }) => `<tr class="${ev ? '' : 'row-warning'}"><td>${escapeHtml(staffName(a.staffId))}</td><td>${escapeHtml(a.dept)} ${escapeHtml(a.title)}</td><td>${C.yearInServiceOf(DATA, a)}年目</td>
       ${items.map((it) => `<td>${ev ? escapeHtml((ev.items || {})[it] || '') : ''}</td>`).join('')}
       <td><strong>${ev ? escapeHtml(ev.overall) : ''}</strong></td><td>${ev ? C.RECOMMEND_LABEL[ev.recommend || ''] : '<span class="badge warn">未入力</span>'}</td>
+      <td>${ev ? C.WISH_LABEL[ev.wish || ''] : ''}</td>
       <td>${ev ? escapeHtml(ev.evaluator) : ''}</td><td>${ev ? ev.evaluatedAt || '' : ''}</td>
       <td class="actions"><button class="btn-small" data-eval="${a.staffId}">${ev ? '編集' : '入力'}</button>${ev ? `<button class="btn-danger" data-del="${ev.id}">削除</button>` : ''}</td></tr>`),
     `${C.fyLabel(fy)}に任用のある職員がいません。`,
@@ -615,6 +758,7 @@ function openEvalForm(staffId, fy) {
     evaluatedAt: ev ? ev.evaluatedAt : todayISO(),
     overall: ev ? ev.overall : '',
     recommend: ev ? ev.recommend : '',
+    wish: ev ? ev.wish || '' : '',
     comment: ev ? ev.comment : '',
   };
   set.evalItems.forEach((it, i) => { values[`item_${i}`] = ev ? (ev.items || {})[it] || '' : ''; });
@@ -622,19 +766,20 @@ function openEvalForm(staffId, fy) {
     ...itemFields,
     { key: 'overall', label: '総合評価', type: 'select', options: grades, hint: '各項目を選ぶと目安が自動で入ります（変更可）' },
     { key: 'recommend', label: '所見（次年度の再度の任用）', type: 'select', options: Object.entries(C.RECOMMEND_LABEL) },
+    { key: 'wish', label: '本人の希望（再度の任用）', type: 'select', options: Object.entries(C.WISH_LABEL) },
     { key: 'evaluator', label: '評価者' },
     { key: 'evaluatedAt', label: '評価日', type: 'date' },
     { key: 'comment', label: '所見・コメント', type: 'textarea', full: true, rows: 4 },
   ], values, (v) => {
     const items = {};
     set.evalItems.forEach((it, i) => { items[it] = v[`item_${i}`]; });
-    const rec = { staffId, fiscalYear: fy, items, overall: v.overall, recommend: v.recommend, evaluator: v.evaluator, evaluatedAt: v.evaluatedAt, comment: v.comment };
+    const rec = { staffId, fiscalYear: fy, items, overall: v.overall, recommend: v.recommend, wish: v.wish, evaluator: v.evaluator, evaluatedAt: v.evaluatedAt, comment: v.comment };
     if (ev) Object.assign(ev, rec);
     else DATA.evaluations.push({ id: C.uid('ev'), ...rec });
     saveData();
     showToast('評価を保存しました。');
     return undefined;
-  }, { wide: true });
+  }, { wide: true, before: '<p class="hint">任期の長短・フル／パートにかかわらず人事評価の対象です。結果は再度の任用の判断要素のひとつですが、任用の優先権を与えるものではありません（市マニュアル第Ⅶ章5）。</p>' });
   const overallEl = document.getElementById('f-overall');
   let touched = !!values.overall;
   overallEl.addEventListener('change', () => { touched = true; });
@@ -706,6 +851,8 @@ function renderExams() {
   }));
   renderExamDetail();
 }
+/** 合格者に提出を求める書類（市マニュアル第Ⅷ章1⑹） */
+const HIRE_DOCS = ['採用承諾書', '住民票の写し', '健康診断書', '被保険者記録照会回答票'];
 function renderExamDetail() {
   const el = document.getElementById('exam-detail');
   const exam = DATA.exams.find((e) => e.id === selectedExamId);
@@ -717,6 +864,7 @@ function renderExamDetail() {
     ${exam.stages.map((st) => `<td><input type="number" class="score" data-app="${a.id}" data-stage="${escapeHtml(st)}" value="${escapeHtml((a.scores || {})[st] ?? '')}"></td>`).join('')}
     <td><strong>${total}</strong>${complete ? '' : '<br><small class="muted">未採点あり</small>'}</td>
     <td><select class="result-select" data-result="${a.id}">${Object.entries(C.RESULT_LABEL).map(([v, l]) => `<option value="${v}"${(a.result || 'pending') === v ? ' selected' : ''}>${l}</option>`).join('')}</select></td>
+    <td>${a.result === 'pass' ? `<div class="doc-checks">${HIRE_DOCS.map((d) => `<label><input type="checkbox" data-doc="${a.id}" data-docname="${d}"${(a.docs || {})[d] ? ' checked' : ''}> ${d}</label>`).join('')}</div>` : ''}</td>
     <td class="actions">${a.result === 'pass' ? (a.appointmentId ? '<span class="badge ok">任用登録済み</span>' : `<button class="btn-small" data-hire="${a.id}">任用登録</button>`) : ''}
       <button class="btn-small" data-edit-app="${a.id}">編集</button><button class="btn-danger" data-del-app="${a.id}">削除</button></td></tr>`;
   el.innerHTML = `<div class="card">
@@ -726,8 +874,9 @@ function renderExamDetail() {
         <label class="btn-secondary file-btn">応募者をExcelから取込<input type="file" id="app-import" accept=".xlsx,.xls,.csv" hidden></label>
         <button class="btn-secondary" id="btn-app-export">結果をExcelに書き出す</button>
       </div></div>
-    <p class="hint">得点を入力すると自動で保存され、合計点の高い順に並びます（辞退者は順位から除外）。採用予定人数：${exam.positions || '—'}人</p>
-    ${tableHtml(['順位', '氏名', ...exam.stages.map(escapeHtml), '合計', '結果', ''],
+    <p class="hint">得点を入力すると自動で保存され、合計点の高い順に並びます（辞退者は順位から除外）。採用予定人数：${exam.positions || '—'}人<br>
+      合格者には採用承諾書・住民票の写し・健康診断書（任用期間1年かつ週29時間以上の者のみ）・被保険者記録照会回答票の提出を依頼します。年金記録にない職歴は在職証明書で確認し、給料（報酬）額を決定します（市マニュアル第Ⅷ章1⑹⑺）。</p>
+    ${tableHtml(['順位', '氏名', ...exam.stages.map(escapeHtml), '合計', '結果', '提出書類', ''],
       ranked.map((r) => rowHtml(r.a, r.rank, r.total, r.complete)).concat(declined.map((a) => rowHtml(a, null, C.applicantTotal(a, exam).total, true))),
       '応募者が登録されていません。')}
   </div>`;
@@ -747,6 +896,11 @@ function renderExamDetail() {
     });
   }));
   el.querySelectorAll('[data-result]').forEach((s) => (s.onchange = () => { find(s.dataset.result).result = s.value; saveData(); }));
+  el.querySelectorAll('[data-doc]').forEach((c) => (c.onchange = () => {
+    const a = find(c.dataset.doc);
+    a.docs = { ...(a.docs || {}), [c.dataset.docname]: c.checked };
+    saveData();
+  }));
   el.querySelectorAll('[data-edit-app]').forEach((b) => (b.onclick = () => openApplicantForm(exam, find(b.dataset.editApp))));
   el.querySelectorAll('[data-del-app]').forEach((b) => (b.onclick = () => {
     if (!confirm('この応募者を削除しますか？')) return;
@@ -790,7 +944,7 @@ function hireApplicant(exam, app) {
     const fy = currentFy();
     const nextFy = exam.examDate ? C.fiscalYearOf(exam.examDate) + 1 : fy;
     openAppointForm(null, {
-      staffId: staff.id, recruitMethod: 'public', dept: exam.dept, title: exam.title, type: exam.type || 'part',
+      staffId: staff.id, recruitMethod: 'public', yearInService: 1, dept: exam.dept, title: exam.title, kubun: exam.type === 'full' ? 'full' : 'part_monthly',
       start: C.fiscalYearStart(nextFy), end: C.fiscalYearEnd(nextFy), note: `${exam.name} 合格`,
       onSaved: (rec) => { app.staffId = staff.id; app.appointmentId = rec.id; rec.examId = exam.id; },
     });
@@ -846,6 +1000,7 @@ function renderImportPreview() {
   if (!importState) { box.innerHTML = ''; return; }
   const kind = document.getElementById('import-kind').value;
   const ws = importState.wb.Sheets[document.getElementById('import-sheet').value];
+  if (kind === 'ninyoIchiran') { renderIchiranPreview(box, ws); return; }
   const res = C.rowsToRecords(sheetRows(ws), kind, DATA.settings);
   importState.result = res;
   importState.kind = kind;
@@ -870,6 +1025,33 @@ function renderImportPreview() {
     <div class="row-actions"><button class="btn-primary" id="btn-import-run">この内容で取り込む</button></div>`;
   document.getElementById('btn-import-run').onclick = runImport;
 }
+/** 任用一覧（総務課の様式）の取込確認 */
+function renderIchiranPreview(box, ws) {
+  const res = C.parseNinyoIchiran(sheetRows(ws), currentFy());
+  importState.result = res;
+  importState.kind = 'ninyoIchiran';
+  if (res.error) { box.innerHTML = `<p class="error-text">${escapeHtml(res.error)}</p>`; return; }
+  const plan = planImport('ninyoIchiran', res.records, true);
+  const noted = res.records.filter((r) => r._notes.length);
+  box.innerHTML = `
+    <h3>取込内容の確認（任用一覧）</h3>
+    <div class="import-summary">
+      <div><strong>見出し行：</strong>${res.headerRow + 1}行目／<strong>年度：</strong>${res.fy ? `${C.fyLabel(res.fy)}（見出し「社会保険」列から判定）` : `見出しから判定できないため${C.fyLabel(currentFy())}を使用`}</div>
+      <div><strong>読み取った列：</strong>${Object.keys(res.map).length}列</div>
+      <div><strong>結果（見込み）：</strong>任用 新規 ${plan.add}件／更新 ${plan.update}件／スキップ ${res.skipped.length}件${plan.newStaff ? `／職員を台帳に追加 ${plan.newStaff}人` : ''}</div>
+      <p class="muted">同じ職員・同じ開始日の任用がすでにあれば、Excelの内容で上書きします（同じファイルを何度取り込んでも二重登録されません）。</p>
+    </div>
+    ${res.skipped.length ? `<details open><summary>取り込まない行（${res.skipped.length}件）</summary><ul>${res.skipped.map((s) => `<li>${s.row}行目：${escapeHtml(s.reason)}</li>`).join('')}</ul></details>` : ''}
+    ${noted.length ? `<details open><summary>確認が必要な行（${noted.length}件）</summary><ul>${noted.map((r) => `<li>${r._row}行目 ${escapeHtml(r.name)}：${r._notes.map(escapeHtml).join('／')}</li>`).join('')}</ul></details>` : ''}
+    ${tableHtml(['行', '伺い', '年目', '職員番号', '氏名', '区分', '所属名', '業務内容', '任用期間', '時間/週', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手'],
+      res.records.slice(0, 100).map((r) => `<tr class="${r._notes.length ? 'row-warning' : ''}"><td>${r._row}</td><td>${r.ukagai ? '○' : ''}</td><td>${escapeHtml(r.yearInService)}</td>
+        <td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.name)}</td><td>${C.KUBUN_LABEL[C.kubunOf(r)]}</td><td>${escapeHtml(r.dept)}</td><td>${escapeHtml(r.title)}</td>
+        <td>${C.toWarekiShort(r.start)}～${C.toWarekiShort(r.end)}</td><td>${r.weeklyHours !== '' ? r.weeklyHours : escapeHtml(r.hoursText)}</td>
+        <td class="num">${escapeHtml(r.baseAmount)}</td><td class="num">${escapeHtml(r.payAmount)}</td><td>${escapeHtml(r.bonus)}</td><td>${escapeHtml(r.socialIns)}</td><td>${escapeHtml(r.empIns)}</td></tr>`))}
+    ${res.records.length > 100 ? `<p class="muted">先頭100件を表示しています（全${res.records.length}件）。</p>` : ''}
+    <div class="row-actions"><button class="btn-primary" id="btn-import-run">この内容で取り込む</button></div>`;
+  document.getElementById('btn-import-run').onclick = runImport;
+}
 /**
  * 取込の見込み（dryRun）と実行を同じ処理で行う。
  * 職員：職員番号→氏名の順で照合し、あれば空欄以外を上書き。
@@ -889,6 +1071,23 @@ function planImport(kind, records, createStaff, apply = false) {
     return s;
   };
   for (const r of records) {
+    if (kind === 'ninyoIchiran') {
+      let s = C.findStaff(target, r.number, r.name);
+      if (!s) {
+        s = { id: C.uid('st'), number: r.number || '', name: r.name, kana: r.kana || '', gender: '', birth: '', createdAt: new Date().toISOString() };
+        target.staff.push(s);
+        out.newStaff += 1;
+      } else {
+        if (r.number && !s.number) s.number = r.number;
+        if (r.kana && !s.kana) s.kana = r.kana;
+      }
+      const { number, name, kana, _row, _notes, ...fields } = r;
+      const rec = { ...fields, staffId: s.id, fiscalYear: C.fiscalYearOf(r.start), status: '' };
+      const existing = target.appointments.find((a) => a.staffId === s.id && a.start === r.start && a.status !== 'canceled');
+      if (existing) { Object.assign(existing, rec); out.update += 1; }
+      else { target.appointments.push({ id: C.uid('ap'), renewals: [], createdAt: new Date().toISOString(), ...rec }); out.add += 1; }
+      continue;
+    }
     if (kind === 'staff') {
       const s = C.findStaff(target, r.number, r.name);
       const vals = {};
@@ -925,7 +1124,7 @@ function planImport(kind, records, createStaff, apply = false) {
 function runImport() {
   if (!importState || !importState.result) return;
   const { kind, result } = importState;
-  const res = planImport(kind, result.records, document.getElementById('import-create-staff').checked, true);
+  const res = planImport(kind, result.records, kind === 'ninyoIchiran' || document.getElementById('import-create-staff').checked, true);
   saveData();
   initFiscalYearPicker();
   document.getElementById('import-preview').innerHTML = `<p class="success-text">取込が完了しました：新規 ${res.add}件／更新 ${res.update}件／スキップ ${res.skip.length + result.skipped.length}件${res.newStaff ? `／職員を自動追加 ${res.newStaff}人` : ''}</p>`;
@@ -956,6 +1155,13 @@ async function importApplicants(exam, file, input) {
 }
 function downloadImportTemplate() {
   const kind = document.getElementById('import-kind').value;
+  if (kind === 'ninyoIchiran') {
+    const rows = C.ninyoIchiranRows({ ...DATA, appointments: [] }, currentFy(), DATA.settings);
+    rows.push(['○', 1, '10001', 'パート(月額)', '高田　花子', 'ﾀｶﾀ　ﾊﾅｺ', '1000', '総務課', '1', '', `${C.toWarekiShort(C.fiscalYearStart(currentFy()))}～${C.toWarekiShort(C.fiscalYearEnd(currentFy()))}`,
+      '総務課', '事務補助員', 30, 10, 151400, '月額', 117212, '毎月21日', '有', '毎月21日', '共済(短期)', '-', '雇用保険', '-', '-', '']);
+    writeWorkbook('取込ひな形_任用一覧.xlsx', [{ name: 'Sheet1', rows }]);
+    return;
+  }
   const samples = {
     staff: [['職員番号', '氏名', 'ふりがな', '性別', '生年月日', '連絡先', '住所', '備考'], ['1001', '高田 花子', 'たかた はなこ', '女', '1985/05/10', '', '', '']],
     appointments: [['職員番号', '氏名', '所属課', '係', '職名', '区分', '任期（自）', '任期（至）', '週勤務時間', '報酬区分', '報酬額', '採用方法', '備考'],
@@ -1000,6 +1206,39 @@ const LAWS = [
     uses: ['報酬の具体的な額・算定方法 → 任用の報酬欄'],
     status: '原文未確認：規則番号・条文は市の例規集で確認してください。',
   },
+  {
+    key: 'manual_gaiyou',
+    level: '市',
+    title: '総務課マニュアル「会計年度任用職員の概要」（令和3年3月29日作成・令和5年3月31日改定）',
+    url: '',
+    docStatus: '資料で確認済み（令和5年3月31日改定版）',
+    uses: [
+      '第Ⅰ章2・第Ⅱ章：フルタイム＝週38.75時間、パートタイム＝週38.75時間未満。週35時間以上のパートは勤務時間設定の考え方を説明できるように → 勤務時間の点検',
+      '第Ⅲ章1・2：給料＝基礎額、月額報酬＝基礎額×週時間/38.75、日額＝基礎額/21、時間額＝基礎額/162.75（1円未満切捨て） → 給料・報酬額の点検・自動計算',
+      '第Ⅲ章3：支給日（フル・月額パート＝当月21日、日額・時間額パート＝翌月21日） → 支給日の点検',
+      '第Ⅳ章10：期末手当＝任用期間6か月以上かつ週15時間30分以上 → 期末手当の判定',
+      '第Ⅶ章1・2：社会保険（週29時間以上＝共済短期＋厚生年金、フルは12月経過で共済組合）、雇用保険（週20時間以上かつ31日以上、フルは6月経過で退職手当） → 保険の判定・切替時期',
+      '第Ⅶ章4：健康診断・ストレスチェック（任用1年かつ週29時間以上） → 判定表示',
+      '第Ⅶ章5：人事評価（任期・フル/パートにかかわらず対象。任用の優先権は与えない） → 人事評価タブ',
+      '第Ⅷ章1：選考・任用のスケジュール、合格者の提出書類 → 採用試験タブ・ホームの年間スケジュール',
+      '第Ⅷ章2：再度の任用は人事評価の結果に基づき判断。公募によらない再度の任用は原則連続2回（最長3会計年度）まで → 次年度の任用案・上限の点検',
+    ],
+    status: '',
+  },
+  {
+    key: 'moushiokuri',
+    level: '市',
+    title: '総務課職員係「申送事項」（会計年度任用職員関係事務）',
+    url: '',
+    docStatus: '資料で確認済み',
+    uses: [
+      '年間スケジュール（4月 資格得喪、10月 雇保→退手切替、1月 再度の任用の通知、3月 任用一覧の作成・任用起案 など） → ホームの年間スケジュール',
+      '再度の任用は人事評価の結果（係長から）と本人の希望による → 人事評価の「本人の希望」',
+      '任期満了退職者は合議がないため任用一覧で確認 → ホームの任期満了一覧',
+      '年度内の任期の更新のみ辞令に現職が載る（翌年度は新たな任用） → 任期更新・再度の任用',
+    ],
+    status: '',
+  },
 ];
 function renderLaws() {
   document.getElementById('law-list').innerHTML = LAWS.map((l) => {
@@ -1007,11 +1246,12 @@ function renderLaws() {
     const verified = !!(saved.text && saved.checkedAt);
     return `<div class="law-item">
       <div class="law-head"><span class="level level-${l.level === '国' ? 'national' : 'city'}">${l.level}</span><h3>${escapeHtml(l.title)}</h3>
-        ${verified ? `<span class="badge ok">原文確認済み（${escapeHtml(saved.checkedAt)}）</span>` : '<span class="badge warn">原文未確認</span>'}</div>
-      ${verified ? '' : `<p class="muted">${escapeHtml(l.status)}</p>`}
+        ${l.docStatus ? `<span class="badge ok">${escapeHtml(l.docStatus)}</span>` : verified ? `<span class="badge ok">原文確認済み（${escapeHtml(saved.checkedAt)}）</span>` : '<span class="badge warn">原文未確認</span>'}</div>
+      ${verified || l.docStatus ? '' : `<p class="muted">${escapeHtml(l.status)}</p>`}
+      ${l.docStatus ? '<p class="muted">金額（基礎額・上限など）はマニュアル作成時点（R5.4.1）の値のため、システムには組み込まず任用ごとに入力します。</p>' : ''}
       <p class="muted">このシステムでの使いどころ：</p><ul>${l.uses.map((u) => `<li>${escapeHtml(u)}</li>`).join('')}</ul>
       ${l.url ? `<p class="muted">出典：<a href="${l.url}" target="_blank" rel="noopener">${l.url}</a>（インターネット接続端末で閲覧）</p>` : ''}
-      <details><summary>条文の本文を貼り付ける・確認する</summary>
+      <details><summary>${l.docStatus ? '関係する記述・改定メモを残す' : '条文の本文を貼り付ける・確認する'}</summary>
         <div class="grid-form">
           <label class="full">条文（原文をそのまま貼り付け）<textarea rows="8" data-law-text="${l.key}">${escapeHtml(saved.text || '')}</textarea></label>
           <label>出典（例規集のURL・版など）<input type="text" data-law-src="${l.key}" value="${escapeHtml(saved.source || '')}"></label>
@@ -1043,7 +1283,18 @@ function renderSettings() {
     <label>常勤職員の1週間当たりの勤務時間（時間）<input type="number" step="0.25" id="set-fullTimeWeeklyHours" value="${escapeHtml(s.fullTimeWeeklyHours)}">
       <small>フルタイム／パートタイムの判定に使用（【国】地方公務員法第22条の2第1項各号）。市の勤務時間の定めに合わせてください。</small></label>
     <label>公募によらない再度の任用の上限回数<input type="number" min="0" id="set-reappointLimit" value="${s.reappointLimit == null ? '' : escapeHtml(s.reappointLimit)}" placeholder="空欄＝判定しない">
-      <small>法律上の上限ではなく、市の運用方針として定める場合に入力します。</small></label>
+      <small>市マニュアル第Ⅷ章2：原則連続2回（最長3会計年度）。</small></label>
+    <label>勤務時間の説明が必要となるパートの週時間（以上）<input type="number" step="0.25" id="set-explainHoursFrom" value="${escapeHtml(s.explainHoursFrom)}">
+      <small>市マニュアル第Ⅱ章2：週35時間以上38.75時間未満。</small></label>
+    <label>日額報酬の除数<input type="number" step="0.01" id="set-dailyDivisor" value="${escapeHtml(s.dailyDivisor)}"><small>市マニュアル第Ⅲ章2：基礎額/21</small></label>
+    <label>時間額報酬の除数<input type="number" step="0.01" id="set-hourlyDivisor" value="${escapeHtml(s.hourlyDivisor)}"><small>市マニュアル第Ⅲ章2：基礎額/162.75</small></label>
+    <label>期末手当：任用期間（月以上）<input type="number" id="set-bonusMinMonths" value="${escapeHtml(s.bonusMinMonths)}"><small>市マニュアル第Ⅳ章10</small></label>
+    <label>期末手当：週勤務時間（時間以上）<input type="number" step="0.25" id="set-bonusMinWeeklyHours" value="${escapeHtml(s.bonusMinWeeklyHours)}"><small>市マニュアル第Ⅳ章10：15時間30分</small></label>
+    <label>社会保険（共済短期）：週時間（以上）<input type="number" step="0.25" id="set-socialInsHours" value="${escapeHtml(s.socialInsHours)}"><small>市マニュアル第Ⅶ章1</small></label>
+    <label>雇用保険：週時間（以上）<input type="number" step="0.25" id="set-empInsHours" value="${escapeHtml(s.empInsHours)}"><small>市マニュアル第Ⅶ章2</small></label>
+    <label>フル：退職手当への切替（月経過）<input type="number" id="set-taishuMonths" value="${escapeHtml(s.taishuMonths)}"><small>市マニュアル第Ⅶ章2：6月</small></label>
+    <label>フル：共済組合への切替（月経過）<input type="number" id="set-kyosaiMonths" value="${escapeHtml(s.kyosaiMonths)}"><small>市マニュアル第Ⅶ章1：12月</small></label>
+    <label>健康診断・ストレスチェック：週時間（以上）<input type="number" step="0.25" id="set-healthCheckHours" value="${escapeHtml(s.healthCheckHours)}"><small>市マニュアル第Ⅶ章4</small></label>
     <label>条件付採用期間（月）<input type="number" min="0" id="set-probationMonths" value="${escapeHtml(s.probationMonths)}">
       <small>原文（【国】地方公務員法第22条の2）で確認のうえ設定。0で非表示。</small></label>
     <label>任期満了の警告（日前から）<input type="number" min="1" id="set-expiryAlertDays" value="${escapeHtml(s.expiryAlertDays)}"></label>
@@ -1064,6 +1315,16 @@ function saveSettings() {
     orgName: document.getElementById('set-orgName').value.trim(),
     fullTimeWeeklyHours: num('set-fullTimeWeeklyHours'),
     reappointLimit: num('set-reappointLimit'),
+    explainHoursFrom: num('set-explainHoursFrom') ?? DATA.settings.explainHoursFrom,
+    dailyDivisor: num('set-dailyDivisor') || DATA.settings.dailyDivisor,
+    hourlyDivisor: num('set-hourlyDivisor') || DATA.settings.hourlyDivisor,
+    bonusMinMonths: num('set-bonusMinMonths') ?? DATA.settings.bonusMinMonths,
+    bonusMinWeeklyHours: num('set-bonusMinWeeklyHours') ?? DATA.settings.bonusMinWeeklyHours,
+    socialInsHours: num('set-socialInsHours') ?? DATA.settings.socialInsHours,
+    empInsHours: num('set-empInsHours') ?? DATA.settings.empInsHours,
+    taishuMonths: num('set-taishuMonths') ?? DATA.settings.taishuMonths,
+    kyosaiMonths: num('set-kyosaiMonths') ?? DATA.settings.kyosaiMonths,
+    healthCheckHours: num('set-healthCheckHours') ?? DATA.settings.healthCheckHours,
     probationMonths: num('set-probationMonths') || 0,
     expiryAlertDays: num('set-expiryAlertDays') || 60,
     backupReminderDays: num('set-backupReminderDays') || 7,
@@ -1115,7 +1376,7 @@ function exportAll() {
     exRows.push([ex.name, C.EXAM_METHOD_LABEL[ex.method] || '', ex.dept || '', ex.title || '', ex.examDate || '', a.name, a.kana || '', C.applicantTotal(a, ex).total, C.RESULT_LABEL[a.result || 'pending']])));
   writeWorkbook(`会計年度任用職員_全データ_${stamp()}.xlsx`, [
     { name: '職員台帳', rows: staffRows },
-    { name: '任用', rows: appointmentSheetRows(DATA.appointments.slice().sort((a, b) => a.start.localeCompare(b.start))) },
+    ...[...new Set(DATA.appointments.filter((a) => a.start).map((a) => C.fiscalYearOf(a.start)))].sort().map((fy) => ({ name: `任用一覧_${C.fyLabel(fy)}`, rows: C.ninyoIchiranRows(DATA, fy, DATA.settings) })),
     { name: '人事評価', rows: evRows },
     { name: '採用試験', rows: exRows },
   ]);
@@ -1152,7 +1413,7 @@ function init() {
     document.getElementById(id).addEventListener('change', renderAppointments);
   });
   document.getElementById('btn-appoint-export').onclick = () =>
-    writeWorkbook(`任用一覧_${C.fyLabel(currentFy())}_${stamp()}.xlsx`, [{ name: '任用', rows: appointmentSheetRows(filteredAppointments().map((x) => x.a)) }]);
+    writeWorkbook(`${C.fyLabel(currentFy())}任用者一覧_${stamp()}.xlsx`, [{ name: 'Sheet1', rows: C.ninyoIchiranRows(DATA, currentFy(), DATA.settings) }]);
 
   document.getElementById('eval-missing-only').onchange = renderEvaluations;
   document.getElementById('btn-eval-export').onclick = () => {

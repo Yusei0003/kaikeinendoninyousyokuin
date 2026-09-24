@@ -38,6 +38,16 @@
   <section id="panel-home" class="tab-panel active">
     <div id="home-stats" class="stat-grid"></div>
     <div class="card">
+      <h2>今後90日以内の手続き・確認</h2>
+      <p class="hint">フルタイムの雇用保険→退職手当（6月経過）・共済組合（短期）→共済組合（12月経過）の切替、任用伺いの未受理、保育士の登録取消者確認の未済を表示します。</p>
+      <div id="home-procedures"></div>
+    </div>
+    <div class="card">
+      <h2>年間スケジュール</h2>
+      <p class="hint">申送事項・市マニュアル第Ⅷ章1をもとにしています。今月の項目を強調表示します。</p>
+      <div id="home-schedule"></div>
+    </div>
+    <div class="card">
       <h2>任期満了が近い職員</h2>
       <p class="hint">本日から「設定」で指定した日数以内に任期が満了する在職中の職員です。</p>
       <div id="home-expiring"></div>
@@ -84,10 +94,10 @@
           <label class="checkbox-label inline"><input type="checkbox" id="appoint-issue-only"> 要確認のみ</label>
           <button class="btn-primary" id="btn-appoint-add">任用を登録</button>
           <button class="btn-secondary" id="btn-next-plan">次年度の任用案を作成</button>
-          <button class="btn-secondary" id="btn-appoint-export">Excelに書き出す</button>
+          <button class="btn-secondary" id="btn-appoint-export">任用一覧（様式）で書き出す</button>
         </div>
       </div>
-      <p class="hint">任期は採用の日の属する会計年度の末日まで（【国】地方公務員法第22条の2）。登録時にフルタイム／パートタイムの勤務時間、任期の重複、公募によらない再度の任用の回数を自動で点検します。</p>
+      <p class="hint">総務課の「任用一覧」と同じ項目で管理します。任期は採用の日の属する会計年度の末日まで（【国】地方公務員法第22条の2）。登録時に、勤務時間・給料/報酬額（算定式）・支給日・期末手当・社会保険・雇保/退手・再度の任用の回数を市マニュアルに照らして自動で点検します。「任用一覧（様式）で書き出す」で同じ列構成のExcelを作れます。</p>
       <div id="appoint-table"></div>
     </div>
   </section>
@@ -126,10 +136,12 @@
   <section id="panel-import" class="tab-panel">
     <div class="card">
       <h2>Excelから取り込む</h2>
-      <p class="hint">既存のExcel台帳（.xlsx／.xls／.csv）をそのまま読み込めます。1行目以外に見出しがあっても、先頭10行から見出し行を自動で探し、「氏名」「所属課」「任期（自）」などの列名の揺れも吸収します。取込前に内容を確認できます。</p>
+      <p class="hint"><strong>過去の「任用一覧」は、年度ごとのファイルをそのまま「任用一覧（総務課の様式）」で取り込めます。</strong>年度は見出しの「R8.4.1 社会保険」から判定し、任用期間が空欄の行はその年度の1年間として登録します（確認が必要な行として表示）。古い年度から順に取り込むと、年目・再度の任用の回数・フルタイムの継続期間が正しく計算されます。<br>
+        そのほかの既存のExcel台帳（.xlsx／.xls／.csv）も読み込めます。1行目以外に見出しがあっても、先頭10行から見出し行を自動で探し、「氏名」「所属課」「任期（自）」などの列名の揺れも吸収します。取込前に内容を確認できます。</p>
       <form id="import-form" class="grid-form">
         <label>取り込む内容
           <select id="import-kind">
+            <option value="ninyoIchiran">任用一覧（総務課の様式）</option>
             <option value="staff">職員台帳</option>
             <option value="appointments">任用（任期・所属・報酬など）</option>
             <option value="evaluations">人事評価</option>
@@ -137,7 +149,7 @@
         </label>
         <label>ファイル<input type="file" id="import-file" accept=".xlsx,.xls,.csv"></label>
         <label>シート<select id="import-sheet"></select></label>
-        <label class="checkbox-label"><input type="checkbox" id="import-create-staff" checked> 台帳にない職員は自動で追加する（任用・評価の取込時）</label>
+        <label class="checkbox-label"><input type="checkbox" id="import-create-staff" checked> 台帳にない職員は自動で追加する（任用・評価の取込時。任用一覧は常に追加）</label>
       </form>
       <div class="row-actions">
         <button class="btn-secondary" id="btn-import-template">取込用のひな形をダウンロード</button>
@@ -184,10 +196,10 @@
     <div class="card">
       <h2>使い方</h2>
       <ol class="help-list">
-        <li><strong>はじめに</strong>：「Excel取込」で既存の職員台帳・任用一覧・評価結果を読み込みます（手入力でも登録できます）。</li>
-        <li><strong>任用</strong>：「任用管理」で任期・所属・勤務時間・報酬を登録します。会計年度を超える任期や、フル／パートの勤務時間の不一致、任期の重複はエラーになります。年度途中の延長は「任期更新」を使います。</li>
+        <li><strong>はじめに</strong>：「Excel取込」→「任用一覧（総務課の様式）」で、過去の任用一覧を古い年度から順に読み込みます。人事評価の結果もExcelから取り込めます（手入力でも登録できます）。</li>
+        <li><strong>任用</strong>：「任用管理」で任用一覧の項目（区分・所属・任用期間・勤務時間・基礎額・給料/報酬・期末手当・保険など）を登録します。入力画面の下に市マニュアルによる判定（報酬の算定式、支給日、期末手当、社会保険、雇保/退手、切替時期）が出るので、「判定結果を入力欄に反映」で入力できます。会計年度を超える任期、フル／パートの勤務時間の不一致、任期の重複はエラーになります。年度途中の延長は「任期更新」を使います。</li>
         <li><strong>人事評価</strong>：「人事評価」で年度ごとに評価を入力します。評価結果と所見は次年度の任用案に反映されます。</li>
-        <li><strong>次年度の準備</strong>：「任用管理」の「次年度の任用案を作成」で、評価結果と再度の任用の回数をもとに翌年度の任用案を一括作成します。公募が必要な職員は推薦から外れ、理由が表示されます。</li>
+        <li><strong>次年度の準備</strong>：「任用管理」の「次年度の任用案を作成」で、評価結果・本人の希望・年目をもとに翌年度の任用案を一括作成します。4年目になる（公募によらない再度の任用が連続3回目になる）職員は公募が必要として推薦から外れます。3月の任用一覧は「任用一覧（様式）で書き出す」で作成できます。</li>
         <li><strong>採用試験</strong>：「採用試験」で試験・選考を登録し、応募者と得点を入力します。合格者は「任用登録」ボタンで職員台帳と任用にそのまま登録できます。</li>
         <li><strong>バックアップ</strong>：作業の終わりに「設定・バックアップ」から保存してください。前回から一定日数が経過すると画面上部に警告が出ます。</li>
       </ol>

@@ -7,9 +7,11 @@
  * 根拠法令の区分
  *   【国】地方公務員法 第22条の2（会計年度任用職員の採用の方法等）
  *   【市】陸前高田市会計年度任用職員の給与等に関する条例・規則
- * 条文の原文はこの画面から取得・確認できていないため、判定の閾値
- * （フルタイムの週勤務時間、再度の任用の上限回数など）はすべて
- * 設定値として外出しし、「根拠法令」タブで条文を貼り付けて確認する。
+ *   【市】総務課マニュアル「会計年度任用職員の概要」（R3.3.29作成・R5.3.31改定）
+ *         以下「市マニュアル」。章番号はこのマニュアルのもの。
+ *   【市】総務課職員係「申送事項」（年間スケジュール・手続き）
+ * 法令の条文原文は取得できていないため、判定の閾値はすべて設定値として
+ * 外出しし、「根拠法令」タブで条文を貼り付けて確認する。
  * ============================================================ */
 
 (function (root) {
@@ -23,13 +25,30 @@
   const EXAM_METHOD_LABEL = { competitive: '競争試験', selection: '選考' };
   const RESULT_LABEL = { pending: '未判定', pass: '合格', fail: '不合格', decline: '辞退' };
   const RECOMMEND_LABEL = { yes: '再度の任用可', hold: '要検討', no: '再度の任用不可', '': '未入力' };
+  const WISH_LABEL = { yes: '希望する', no: '希望しない', '': '未確認' };
 
   const DEFAULT_SETTINGS = {
-    // 常勤職員の1週間当たりの通常の勤務時間（フル／パートの判定に使用）。
-    // 市の勤務時間条例で定める時間を設定すること。
+    // 常勤職員の1週間当たりの通常の勤務時間（市マニュアル第Ⅰ章2：週38.75時間）
     fullTimeWeeklyHours: 38.75,
-    // 公募によらない再度の任用の上限回数。空欄（null）なら判定しない。
-    reappointLimit: null,
+    // 公募によらない再度の任用の上限回数（市マニュアル第Ⅷ章2：原則連続2回・最長3会計年度）
+    reappointLimit: 2,
+    // この時間以上・フル未満のパートは勤務時間設定の説明が必要（市マニュアル第Ⅱ章2：週35時間以上）
+    explainHoursFrom: 35,
+    // 報酬の算定式の除数（市マニュアル第Ⅲ章2）
+    dailyDivisor: 21,
+    hourlyDivisor: 162.75,
+    // 期末手当の支給要件（市マニュアル第Ⅳ章10：任用期間6か月以上かつ週15時間30分以上）
+    bonusMinMonths: 6,
+    bonusMinWeeklyHours: 15.5,
+    // 社会保険（市マニュアル第Ⅶ章1：週29時間以上は共済組合（短期）及び厚生年金）
+    socialInsHours: 29,
+    // 雇用保険（市マニュアル第Ⅶ章2：週20時間以上かつ31日以上の雇用見込み）
+    empInsHours: 20,
+    // フルタイムの切替時期（市マニュアル第Ⅶ章1・2：退職手当は6月超、共済組合は12月超）
+    taishuMonths: 6,
+    kyosaiMonths: 12,
+    // 健康診断・ストレスチェック（市マニュアル第Ⅶ章4：任用1年かつ週29時間以上）
+    healthCheckHours: 29,
     // 任期満了の何日前から一覧に警告表示するか
     expiryAlertDays: 60,
     // 評価段階（上位から）
@@ -152,24 +171,146 @@
   }
 
   /**
-   * 任用の直前までに「公募によらない再度の任用」が何回連続しているかを数える。
+   * 任用の時点で「公募によらない再度の任用」が何回連続しているかを数える。
    * 同じ職員の任用を年度順に並べ、直近の「公募」以降の再度の任用を数える。
+   * 任用一覧の「会計年度（何年目）」が入っている任用はその値を正とする（年目−1回）。
    * 同一年度内の任期の更新は再度の任用に数えない。
    */
   function consecutiveReappointCount(data, staffId, uptoAppt) {
-    const list = appointmentsOfStaff(data, staffId).filter((a) => !uptoAppt || a.id !== uptoAppt.id);
+    const list = appointmentsOfStaff(data, staffId).filter((a) => a.status !== 'canceled' && (!uptoAppt || a.id !== uptoAppt.id));
     if (uptoAppt) list.push(uptoAppt);
     list.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
     let count = 0;
     let lastFy = null;
     for (const a of list) {
-      const fy = a.fiscalYear != null ? Number(a.fiscalYear) : fiscalYearOf(a.start);
-      if (a.recruitMethod === 'public') count = 0;
+      const fy = a.fiscalYear != null && a.fiscalYear !== '' ? Number(a.fiscalYear) : fiscalYearOf(a.start);
+      if (Number(a.yearInService) > 0) count = Number(a.yearInService) - 1;
+      else if (a.recruitMethod === 'public') count = 0;
       else if (a.recruitMethod === 'reappoint' && fy !== lastFy) count += 1;
       lastFy = fy;
       if (uptoAppt && a.id === uptoAppt.id) break;
     }
     return count;
+  }
+  /** 公募から数えて何年目（会計年度）の任用か */
+  function yearInServiceOf(data, appt) {
+    if (Number(appt.yearInService) > 0) return Number(appt.yearInService);
+    if (!appt.staffId) return 1;
+    return consecutiveReappointCount(data, appt.staffId, appt) + 1;
+  }
+
+  /* ------------------------------------------------------------
+   * 任用一覧の区分・給与・保険の判定（市マニュアル）
+   * ------------------------------------------------------------ */
+  const KUBUN_LABEL = { full: 'フル', part_monthly: 'パート(月額)', part_daily: 'パート(日額)', part_hourly: 'パート(時間額)' };
+  function kubunOf(a) { return a.type === 'full' ? 'full' : `part_${a.payType || 'monthly'}`; }
+  function applyKubun(rec, kubun) {
+    if (kubun === 'full') { rec.type = 'full'; rec.payType = 'monthly'; }
+    else { rec.type = 'part'; rec.payType = String(kubun).replace('part_', '') || 'monthly'; }
+    return rec;
+  }
+  function hoursOf(a) { const h = Number(a.weeklyHours); return a.weeklyHours !== '' && a.weeklyHours != null && h > 0 ? h : null; }
+
+  /** 任用期間の月数（端数切捨て）。例：4/1〜3/31＝12、4/1〜9/30＝6 */
+  function termMonths(a) {
+    if (!parseISO(a.start) || !parseISO(a.end)) return null;
+    const s = parseISO(a.start);
+    const e = parseISO(addDaysISO(a.end, 1));
+    let m = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+    if (e.getDate() < s.getDate()) m -= 1;
+    return m;
+  }
+
+  /** 給料・報酬額の算定（市マニュアル第Ⅲ章。1円未満切捨て） */
+  function calcPay(a, settings) {
+    const base = Number(a.baseAmount);
+    if (!(base > 0)) return null;
+    const fl = (x) => Math.floor(x + 1e-9);
+    if (a.type === 'full') return fl(base);
+    if (a.payType === 'monthly') { const h = hoursOf(a); return h ? fl((base * h) / Number(settings.fullTimeWeeklyHours)) : null; }
+    if (a.payType === 'daily') return fl(base / Number(settings.dailyDivisor));
+    if (a.payType === 'hourly') return fl(base / Number(settings.hourlyDivisor));
+    return null;
+  }
+  /** 給料・報酬の支給日（市マニュアル第Ⅲ章3） */
+  function expectedPayDay(a) {
+    return a.type === 'full' || a.payType === 'monthly' ? '毎月21日' : '翌月21日';
+  }
+  /** 期末手当の支給の有無（市マニュアル第Ⅳ章10）。判定できなければ null */
+  function bonusEligibility(a, settings) {
+    const h = hoursOf(a);
+    const m = termMonths(a);
+    if (m == null) return null;
+    if (m < Number(settings.bonusMinMonths)) return '無';
+    if (h == null) return null;
+    return h >= Number(settings.bonusMinWeeklyHours) ? '有' : '無';
+  }
+
+  /**
+   * フルタイムとして継続して勤務している開始日。
+   * 同じ職員のフルタイムの任用を、切れ目なく（前の任期の翌日に開始）さかのぼる。
+   * 任用一覧の「何年目」がシステム内の履歴より長い場合は、その年数分4月1日にさかのぼって推定する。
+   */
+  function fullTimeServiceStart(data, appt) {
+    if (appt.type !== 'full' || !parseISO(appt.start)) return null;
+    const list = appointmentsOfStaff(data, appt.staffId).filter((a) => a.status !== 'canceled' && a.type === 'full' && a.id !== appt.id);
+    let cur = appt;
+    let years = 1;
+    for (;;) {
+      const prevEnd = addDaysISO(cur.start, -1);
+      const prev = list.find((a) => a.end === prevEnd);
+      if (!prev) break;
+      if (fiscalYearOf(prev.start) !== fiscalYearOf(cur.start)) years += 1;
+      cur = prev;
+    }
+    const y = Number(appt.yearInService);
+    if (y > years && cur.start.slice(5) === '04-01') {
+      return { date: fiscalYearStart(fiscalYearOf(cur.start) - (y - years)), estimated: true };
+    }
+    return { date: cur.start, estimated: false };
+  }
+  /** フルタイムの雇用保険→退職手当、健保（共済短期）→共済組合の切替時期（市マニュアル第Ⅶ章1・2） */
+  function fullTimeSwitchDates(data, appt, settings) {
+    const ss = fullTimeServiceStart(data, appt);
+    if (!ss) return null;
+    return {
+      serviceStart: ss.date,
+      estimated: ss.estimated,
+      taishu: addMonthsISO(ss.date, Number(settings.taishuMonths)),
+      kyosai: addMonthsISO(ss.date, Number(settings.kyosaiMonths)),
+    };
+  }
+  /** 任用開始日時点の社会保険の目安（市マニュアル第Ⅶ章1）。sure=false は要件確認が必要 */
+  function suggestSocialIns(data, appt, settings) {
+    if (appt.type === 'full') {
+      const sw = fullTimeSwitchDates(data, appt, settings);
+      return { value: sw && sw.kyosai <= appt.start ? '共済' : '共済(短期)', sure: true };
+    }
+    const h = hoursOf(appt);
+    if (h == null) return null;
+    if (h >= Number(settings.socialInsHours)) return { value: '共済(短期)', sure: true };
+    if (h >= 20) return { value: '共済(短期)', sure: false, note: '週20時間以上29時間未満：賃金月額8.8万円以上・雇用期間1年以上見込み・学生でない の要件を確認' };
+    return { value: '無', sure: true };
+  }
+  /** 任用開始日時点の雇用保険／退職手当の目安（市マニュアル第Ⅶ章2） */
+  function suggestEmpIns(data, appt, settings) {
+    if (appt.type === 'full') {
+      const sw = fullTimeSwitchDates(data, appt, settings);
+      return { value: sw && sw.taishu <= appt.start ? '退手' : '雇用保険', sure: true };
+    }
+    const h = hoursOf(appt);
+    if (h == null) return null;
+    const days = parseISO(appt.start) && parseISO(appt.end) ? diffDays(appt.start, appt.end) + 1 : 0;
+    return { value: h >= Number(settings.empInsHours) && days >= 31 ? '雇用保険' : '無', sure: true };
+  }
+  /** 健康診断・ストレスチェックの対象（市マニュアル第Ⅶ章4） */
+  function healthCheckRequired(appt, settings) {
+    const h = hoursOf(appt);
+    const m = termMonths(appt);
+    return h != null && m != null && m >= 12 && h >= Number(settings.healthCheckHours);
+  }
+  function normInsText(v) {
+    return String(v == null ? '' : v).normalize('NFKC').replace(/\s/g, '');
   }
 
   /**
@@ -181,6 +322,7 @@
     const err = (msg, basis) => issues.push({ level: 'error', msg, basis });
     const warn = (msg, basis) => issues.push({ level: 'warn', msg, basis });
     const LAW = '【国】地方公務員法第22条の2';
+    const MAN = (ch) => `【市】市マニュアル${ch}`;
 
     if (!appt.staffId) err('職員が選択されていません。');
     const s = parseISO(appt.start);
@@ -198,26 +340,61 @@
       }
     }
 
-    const hours = Number(appt.weeklyHours);
+    const hours = hoursOf(appt);
     const fullHours = Number(settings.fullTimeWeeklyHours);
-    if (!(hours > 0)) {
-      err('1週間当たりの勤務時間を入力してください。');
+    const hoursRequired = appt.type === 'full' || appt.payType === 'monthly';
+    if (hours == null) {
+      if (hoursRequired) err('1週間当たりの勤務時間を入力してください（フル・月額パートは必須）。');
     } else if (fullHours > 0) {
       if (appt.type === 'full' && hours !== fullHours) {
-        err(`フルタイムは1週間当たりの勤務時間が常勤職員と同一（設定値：${fullHours}時間）である必要があります。`, LAW);
+        err(`フルタイムは1週間当たりの勤務時間が常勤職員と同一（週${fullHours}時間）である必要があります。`, `${LAW}／${MAN('第Ⅰ章2')}`);
       }
       if (appt.type === 'part' && hours >= fullHours) {
-        err(`パートタイムは1週間当たりの勤務時間が常勤職員（設定値：${fullHours}時間）より短い必要があります。`, LAW);
+        err(`パートタイムは1週間当たりの勤務時間が常勤職員（週${fullHours}時間）より短い必要があります。`, `${LAW}／${MAN('第Ⅰ章2')}`);
+      }
+      if (appt.type === 'part' && hours >= Number(settings.explainHoursFrom) && hours < fullHours) {
+        warn(`週${hours}時間のパートタイムです（週${settings.explainHoursFrom}時間以上${fullHours}時間未満）。勤務時間設定の考え方を説明できるようにしておいてください。`, MAN('第Ⅱ章2'));
       }
     }
 
     if (!(Number(appt.payAmount) > 0)) {
-      warn('報酬（給料）額が未入力です。', '【市】陸前高田市会計年度任用職員の給与等に関する条例・規則');
+      warn('給料・報酬額が未入力です。', '【市】陸前高田市会計年度任用職員の給与等に関する条例・規則');
+    } else {
+      const calc = calcPay(appt, settings);
+      if (calc != null && calc !== Number(appt.payAmount)) {
+        warn(`給料・報酬額が算定式による額（${calc.toLocaleString('ja-JP')}円）と一致しません（入力：${Number(appt.payAmount).toLocaleString('ja-JP')}円）。`,
+          `${MAN('第Ⅲ章1・2')}（月額＝基礎額×週時間/${fullHours}、日額＝基礎額/${settings.dailyDivisor}、時間額＝基礎額/${settings.hourlyDivisor}、1円未満切捨て）`);
+      }
     }
+    if (appt.payDay && normInsText(appt.payDay) !== expectedPayDay(appt)) {
+      warn(`給料・報酬の支給日は「${expectedPayDay(appt)}」です（入力：${appt.payDay}）。`, MAN('第Ⅲ章3'));
+    }
+    if (appt.bonus) {
+      const b = bonusEligibility(appt, settings);
+      if (b && b !== normInsText(appt.bonus)) {
+        warn(`期末手当は「${b}」と判定されます（入力：${appt.bonus}）。要件：任用期間${settings.bonusMinMonths}か月以上かつ週${settings.bonusMinWeeklyHours}時間以上。`, MAN('第Ⅳ章10'));
+      }
+    }
+    if (appt.socialIns && appt.staffId) {
+      const sug = suggestSocialIns(data, appt, settings);
+      if (sug && sug.sure && sug.value !== normInsText(appt.socialIns)) {
+        warn(`社会保険は「${sug.value}」と判定されます（入力：${appt.socialIns}）。`, MAN('第Ⅶ章1'));
+      }
+    }
+    if (appt.empIns && appt.staffId) {
+      const sug = suggestEmpIns(data, appt, settings);
+      if (sug && sug.value !== normInsText(appt.empIns)) {
+        warn(`雇用保険／退職手当は「${sug.value}」と判定されます（入力：${appt.empIns}）。`, MAN('第Ⅶ章2'));
+      }
+    }
+    if (/保育士/.test(appt.title || '') && normInsText(appt.hoikushiCheck) !== '済') {
+      warn('保育士の任用です。保育士特定登録取消者管理システムの確認が「済」になっていません。', '任用一覧の確認項目');
+    }
+
     // 同一職員の任期の重複
     if (appt.staffId && s && e) {
       for (const other of data.appointments) {
-        if (other.id === appt.id || other.staffId !== appt.staffId) continue;
+        if (other.id === appt.id || other.staffId !== appt.staffId || other.status === 'canceled') continue;
         if (!(other.end < appt.start || other.start > appt.end)) {
           err(`同じ職員の別の任用（${other.start}〜${other.end}／${other.dept || ''} ${other.title || ''}）と任期が重なっています。`);
         }
@@ -229,7 +406,7 @@
     if (appt.staffId && appt.recruitMethod === 'reappoint' && limit != null && limit !== '' && s) {
       const n = consecutiveReappointCount(data, appt.staffId, appt);
       if (n > Number(limit)) {
-        warn(`公募によらない再度の任用が連続${n}回目です（設定上限：${limit}回）。公募の実施を検討してください。`, '【市】運用方針（設定値）');
+        warn(`公募によらない再度の任用が連続${n}回目（${n + 1}年目）です（上限：連続${limit}回・最長${Number(limit) + 1}会計年度）。原則として公募が必要です。`, MAN('第Ⅷ章2'));
       }
     }
     return issues;
@@ -324,24 +501,27 @@
         (a) => a.staffId === staffId && a.status !== 'canceled' && fiscalYearOf(a.start) === nextFy,
       );
       const ev = evaluationFor(data, staffId, fy);
+      // 前年度の任用内容を引き継ぎ、年度ごとに確認する項目（伺い・切替時期など）は空にする
       const draft = {
+        ...base,
         id: uid('ap'),
-        staffId,
         fiscalYear: nextFy,
-        type: base.type,
-        dept: base.dept,
-        section: base.section,
-        title: base.title,
         start: fiscalYearStart(nextFy),
         end: fiscalYearEnd(nextFy),
-        weeklyHours: base.weeklyHours,
-        payType: base.payType,
-        payAmount: base.payAmount,
         recruitMethod: 'reappoint',
-        status: 'planned',
+        yearInService: yearInServiceOf(data, base) + 1,
+        status: '',
+        ukagai: false,
+        kyosaiSwitch: '',
+        taishuSwitch: '',
+        socialIns: '',
+        empIns: '',
         note: '',
         renewals: [],
+        createdAt: undefined,
       };
+      delete draft.createdAt;
+      delete draft.examId;
       const reasons = [];
       let recommend = true;
       if (already) { recommend = false; reasons.push(`${fyLabel(nextFy)}の任用が登録済み`); }
@@ -352,12 +532,13 @@
         if (ev.overall && !settings.reappointGrades.includes(ev.overall)) {
           recommend = false; reasons.push(`総合評価 ${ev.overall}（推薦基準：${settings.reappointGrades.join('・')}）`);
         }
+        if (ev.wish === 'no') { recommend = false; reasons.push('本人が再度の任用を希望していない'); }
+        if (!ev.wish) reasons.push('本人の希望が未確認');
       }
-      const tmp = { ...data, appointments: data.appointments.concat([draft]) };
-      const n = consecutiveReappointCount(tmp, staffId, draft);
+      const n = draft.yearInService - 1;
       const limit = settings.reappointLimit;
       const overLimit = limit != null && limit !== '' && n > Number(limit);
-      if (overLimit) { recommend = false; reasons.push(`公募によらない再度の任用が連続${n}回目（上限${limit}回）→ 公募が必要`); }
+      if (overLimit) { recommend = false; reasons.push(`${draft.yearInService}年目となり、公募によらない再度の任用の上限（連続${limit}回）を超える → 公募が必要`); }
       plans.push({ staffId, base, draft, evaluation: ev, recommend, reasons, already, reappointCount: n, overLimit });
     }
     return plans;
@@ -462,6 +643,7 @@
 
   function normalizeHeader(h) {
     return String(h == null ? '' : h)
+      .normalize('NFKC')
       .replace(/[\s　]/g, '')
       .replace(/[（）()]/g, (c) => ({ '（': '(', '）': ')' }[c] || c))
       .toLowerCase();
@@ -625,6 +807,215 @@
     return { records, skipped, map: det.map, headerRow: det.headerRow };
   }
 
+  /* ------------------------------------------------------------
+   * 総務課「任用一覧」Excel（1行＝1任用）の読込・書出し
+   * ------------------------------------------------------------ */
+  /** 'R8.4.1' → '2026-04-01'（R/H/令和/平成、区切りは . / 年月日） */
+  function parseWarekiShort(v) {
+    return excelValueToISO(typeof v === 'string' ? v.normalize('NFKC').replace(/\s/g, '') : v);
+  }
+  function toWarekiShort(iso) {
+    const d = parseISO(iso);
+    if (!d) return '';
+    const y = d.getFullYear();
+    return y >= 2019 ? `R${y - 2018}.${d.getMonth() + 1}.${d.getDate()}` : `${y}.${d.getMonth() + 1}.${d.getDate()}`;
+  }
+  /** 'R8.4.1～R9.3.31' → ['2026-04-01','2027-03-31'] */
+  function parsePeriod(v) {
+    if (v == null || v === '') return null;
+    const s = String(v).normalize('NFKC').replace(/\s/g, '');
+    const parts = s.split(/[~〜～―]|から|-(?=[RHS令平昭])/).filter(Boolean);
+    if (parts.length < 2) return null;
+    const a = parseWarekiShort(parts[0].replace(/まで$/, ''));
+    const b = parseWarekiShort(parts[parts.length - 1].replace(/まで$/, ''));
+    return a && b ? [a, b] : null;
+  }
+  /** 切替時期のセル：Excelで「4/1」と入力されると年付きの日付になるため、月/日の文字にする */
+  function switchCellText(v) {
+    if (v == null) return '';
+    if (v instanceof Date) return `${v.getMonth() + 1}/${v.getDate()}`;
+    const s = String(v).trim();
+    return s === '-' || s === '－' ? '' : s;
+  }
+  function dashToEmpty(v) {
+    const s = cellText(v);
+    return s === '-' || s === '－' || s === 'ー' ? '' : s;
+  }
+
+  const ICHIRAN_COLUMNS = [
+    // [フィールド, 見出しの判定（NFKC・空白除去後）]
+    ['ukagai', (h) => h.startsWith('任用伺')],
+    ['yearInService', (h) => h === '会計年度'],
+    ['number', (h) => h === '職員番号'],
+    ['kubun', (h) => h === '区分'],
+    ['name', (h) => h === '氏名'],
+    ['kana', (h) => h === 'フリガナ' || h === 'ふりがな'],
+    ['deptCode', (h) => h === '所属CD' || h === '所属コード'],
+    ['dept', (h) => h === '所属名' || h === '所属'],
+    ['account', (h) => h === '会計'],
+    ['budgetCode', (h) => h === '予算科目'],
+    ['period', (h) => h === '任用期間'],
+    ['workplace', (h) => h === '就業場所'],
+    ['title', (h) => h === '業務内容'],
+    ['weeklyHours', (h) => h.startsWith('勤務時間')],
+    ['annualLeave', (h) => h.startsWith('年休')],
+    ['baseAmount', (h) => h === '基礎額'],
+    ['payTypeText', (h) => h === '給料・報酬'],
+    ['payDay', (h) => h === '給料・報酬支給日'],
+    ['bonus', (h) => h.startsWith('期末手当')],
+    ['commuteDay', (h) => h === '通勤手当支給日'],
+    ['socialIns', (h) => h.endsWith('社会保険')],
+    ['kyosaiSwitch', (h) => h.includes('共済切替')],
+    ['empIns', (h) => h.endsWith('雇保/退手')],
+    ['taishuSwitch', (h) => h.includes('退手切替')],
+    ['hoikushiCheck', (h) => h.includes('保育士特定登録')],
+    ['note', (h) => h === '備考'],
+  ];
+  const ICHIRAN_HEADERS = ['任用\n伺い', '会計\n年度', '職員\n番号', '区分', '氏名', 'ﾌﾘｶﾞﾅ', '所属\nCD', '所属名', '会計', '予算科目', '任用期間',
+    '就業\n場所', '業務内容', '勤務\n時間/週', '年休\n（日数）', '基礎額', '給料・報酬', '', '給料・報酬\n支給日', '期末手当\n支給の有無',
+    '通勤手当\n支給日', '{FY}\n社会保険', '健保→共済\n切替時期', '{FY}\n雇保/退手', '雇保→退手\n切替時期', '保育士特定登録取消者管理システム', '備考'];
+
+  function ichiranHeaderKey(h) { return String(h == null ? '' : h).normalize('NFKC').replace(/\s/g, ''); }
+
+  /** 見出し行を探して列の対応を返す。「給料・報酬」の右隣の見出しなし列を金額とする。 */
+  function detectIchiranColumns(rows) {
+    for (let r = 0; r < Math.min(rows.length, 10); r++) {
+      const hs = (rows[r] || []).map(ichiranHeaderKey);
+      if (!hs.includes('氏名') || !(hs.includes('任用期間') || hs.includes('区分'))) continue;
+      const map = {};
+      hs.forEach((h, i) => {
+        if (!h) return;
+        const hit = ICHIRAN_COLUMNS.find(([f, test]) => map[f] === undefined && test(h));
+        if (hit) map[hit[0]] = i;
+      });
+      if (map.payTypeText !== undefined && !hs[map.payTypeText + 1]) map.payAmount = map.payTypeText + 1;
+      const fyHeader = hs.find((h) => /社会保険$/.test(h));
+      const fy = fyHeader ? fiscalYearOf(parseWarekiShort(fyHeader.replace(/社会保険$/, '')) || '') : null;
+      return { headerRow: r, map, fy: Number.isFinite(fy) ? fy : null };
+    }
+    return { headerRow: -1, map: {}, fy: null };
+  }
+
+  function parseKubun(kubunText, payTypeText) {
+    const s = String(kubunText || '').normalize('NFKC');
+    if (/フル/.test(s)) return 'full';
+    const t = `${s}${String(payTypeText || '')}`;
+    if (/時間/.test(t)) return 'part_hourly';
+    if (/日額/.test(t)) return 'part_daily';
+    if (/月額/.test(t) || /パート/.test(s)) return 'part_monthly';
+    return '';
+  }
+
+  /**
+   * 任用一覧の行データ（2次元配列）を取込用レコードに変換する。
+   * defaultFy：任用期間が空欄の行に使う年度（見出しの「R8.4.1 社会保険」から読めればそちらを優先）
+   */
+  function parseNinyoIchiran(rows, defaultFy) {
+    const det = detectIchiranColumns(rows);
+    if (det.headerRow < 0) {
+      return { records: [], skipped: [], error: '「氏名」「任用期間」（または「区分」）の見出しがある行が見つかりません。任用一覧の様式か確認してください。' };
+    }
+    const fy = det.fy || defaultFy;
+    const records = [];
+    const skipped = [];
+    const get = (row, f) => (det.map[f] === undefined ? '' : row[det.map[f]]);
+    for (let r = det.headerRow + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const name = cellText(get(row, 'name'));
+      if (!name) { if (row.some((c) => c != null && c !== '')) skipped.push({ row: r + 1, reason: '氏名が空欄' }); continue; }
+      const notes = [];
+      const kubun = parseKubun(get(row, 'kubun'), get(row, 'payTypeText'));
+      if (!kubun) notes.push('区分を読み取れないため「パート(月額)」として登録');
+      let period = parsePeriod(get(row, 'period'));
+      if (!period) {
+        if (!fy) { skipped.push({ row: r + 1, reason: '任用期間が空欄で、年度も判定できません' }); continue; }
+        period = [fiscalYearStart(fy), fiscalYearEnd(fy)];
+        notes.push(`任用期間が空欄のため${fyLabel(fy)}の1年間として登録（要確認）`);
+      }
+      const hoursRaw = get(row, 'weeklyHours');
+      const hoursNum = toNumber(hoursRaw);
+      const yis = toNumber(get(row, 'yearInService'));
+      const rec = applyKubun({
+        number: cellText(get(row, 'number')),
+        name,
+        kana: cellText(get(row, 'kana')),
+        ukagai: /[○〇◯済]/.test(cellText(get(row, 'ukagai'))),
+        yearInService: yis === '' ? '' : yis,
+        deptCode: cellText(get(row, 'deptCode')),
+        dept: cellText(get(row, 'dept')),
+        account: cellText(get(row, 'account')),
+        budgetCode: cellText(get(row, 'budgetCode')),
+        start: period[0],
+        end: period[1],
+        workplace: cellText(get(row, 'workplace')),
+        title: cellText(get(row, 'title')),
+        weeklyHours: hoursNum,
+        hoursText: hoursNum === '' ? dashToEmpty(hoursRaw) : '',
+        annualLeave: toNumber(dashToEmpty(get(row, 'annualLeave'))),
+        baseAmount: toNumber(get(row, 'baseAmount')),
+        payAmount: toNumber(get(row, 'payAmount')),
+        payDay: dashToEmpty(get(row, 'payDay')),
+        bonus: dashToEmpty(get(row, 'bonus')),
+        commuteDay: dashToEmpty(get(row, 'commuteDay')),
+        socialIns: normInsText(dashToEmpty(get(row, 'socialIns'))),
+        kyosaiSwitch: switchCellText(get(row, 'kyosaiSwitch')),
+        empIns: normInsText(dashToEmpty(get(row, 'empIns'))),
+        taishuSwitch: switchCellText(get(row, 'taishuSwitch')),
+        hoikushiCheck: cellText(get(row, 'hoikushiCheck')),
+        note: cellText(get(row, 'note')),
+        recruitMethod: Number(yis) >= 2 ? 'reappoint' : 'public',
+      }, kubun || 'part_monthly');
+      rec._row = r + 1;
+      rec._notes = notes;
+      records.push(rec);
+    }
+    return { records, skipped, map: det.map, headerRow: det.headerRow, fy };
+  }
+
+  /** 任用一覧の様式（同じ列構成）で書き出す行データ */
+  function ninyoIchiranRows(data, fy, settings) {
+    const header = ICHIRAN_HEADERS.map((h) => h.replace('{FY}', toWarekiShort(fiscalYearStart(Number(fy)))));
+    const list = data.appointments
+      .filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === Number(fy))
+      .sort((a, b) => String(a.deptCode || '').localeCompare(String(b.deptCode || '')) || String(a.dept || '').localeCompare(String(b.dept || ''), 'ja'));
+    const rows = [header];
+    for (const a of list) {
+      const s = data.staff.find((x) => x.id === a.staffId) || {};
+      const sw = fullTimeSwitchDates(data, a, settings);
+      const md = (iso) => { const d = parseISO(iso); return d ? `${d.getMonth() + 1}/${d.getDate()}` : ''; };
+      rows.push([
+        a.ukagai ? '○' : '',
+        yearInServiceOf(data, a),
+        s.number || '',
+        KUBUN_LABEL[kubunOf(a)],
+        s.name || '',
+        s.kana || '',
+        a.deptCode || '',
+        a.dept || '',
+        a.account || '',
+        a.budgetCode || '',
+        `${toWarekiShort(a.start)}～${toWarekiShort(a.end)}`,
+        a.workplace || '',
+        a.title || '',
+        hoursOf(a) != null ? hoursOf(a) : a.hoursText || '',
+        a.annualLeave === '' || a.annualLeave == null ? '-' : a.annualLeave,
+        a.baseAmount === '' || a.baseAmount == null ? '' : a.baseAmount,
+        PAY_TYPE_LABEL[a.payType] || '',
+        a.payAmount === '' || a.payAmount == null ? '' : a.payAmount,
+        a.payDay || expectedPayDay(a),
+        a.bonus || bonusEligibility(a, settings) || '',
+        a.commuteDay || expectedPayDay(a),
+        a.socialIns || '',
+        a.kyosaiSwitch || (sw ? md(sw.kyosai) : '-'),
+        a.empIns || '',
+        a.taishuSwitch || (sw ? md(sw.taishu) : '-'),
+        a.hoikushiCheck || '-',
+        a.note || '',
+      ]);
+    }
+    return rows;
+  }
+
   /** 職員番号優先、なければ氏名（空白除去）で職員を探す */
   function findStaff(data, number, name) {
     if (number) {
@@ -639,11 +1030,14 @@
 
   const api = {
     APPOINT_TYPE_LABEL, APPOINT_TYPE_SHORT, RECRUIT_LABEL, PAY_TYPE_LABEL, EXAM_METHOD_LABEL,
-    RESULT_LABEL, RECOMMEND_LABEL, STATUS_LABEL, DEFAULT_SETTINGS, IMPORT_SCHEMAS,
+    RESULT_LABEL, RECOMMEND_LABEL, WISH_LABEL, STATUS_LABEL, DEFAULT_SETTINGS, IMPORT_SCHEMAS, KUBUN_LABEL,
     toISO, parseISO, diffDays, addDaysISO, addMonthsISO, fiscalYearOf, fiscalYearStart, fiscalYearEnd,
     warekiYear, fyLabel, formatDateJa, uid,
     emptyData, normalizeData,
-    appointmentsOfStaff, probationEnd, consecutiveReappointCount, validateAppointment, validateRenewal,
+    appointmentsOfStaff, probationEnd, consecutiveReappointCount, yearInServiceOf, validateAppointment, validateRenewal,
+    kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
+    fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired,
+    parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     appointmentStatus, expiringAppointments,
     evaluationFor, suggestOverall, missingEvaluations, buildNextYearPlan,
     applicantTotal, rankApplicants,

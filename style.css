@@ -443,3 +443,32 @@ summary { cursor: pointer; color: var(--primary); }
   .app-header, main { padding-left: 16px; padding-right: 16px; }
   .tabs { padding: 0 16px; }
 }
+
+/* ---------- 任用一覧・判定 ---------- */
+td.num { text-align: right; }
+td.issues-cell { min-width: 260px; }
+.form-heading {
+  grid-column: 1 / -1;
+  margin: 8px 0 -4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--primary);
+}
+.judge-box {
+  border: 1px solid #c7d7fb;
+  background: #f5f8ff;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+.judge-box h4 { margin: 0 0 8px; font-size: 14px; }
+.judge-box .kv { font-size: 13px; }
+.warn-text { color: #92400e; }
+.doc-checks { display: flex; flex-direction: column; gap: 2px; font-size: 12px; white-space: nowrap; }
+.doc-checks input { margin: 0 4px 0 0; }
+.schedule { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.schedule li { display: flex; gap: 12px; padding: 6px 8px; border-bottom: 1px solid #eef1f4; }
+.schedule li:last-child { border-bottom: none; }
+.schedule li.now { background: #eef4ff; font-weight: 600; border-radius: 6px; }
+.schedule .month { flex: 0 0 3em; color: var(--primary); font-weight: 700; }
