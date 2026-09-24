@@ -21,11 +21,16 @@
 </header>
 
 <nav class="tabs">
-  <button class="tab-btn active" data-tab="home">ホーム</button>
   <button class="tab-btn" data-tab="staff">職員台帳</button>
-  <button class="tab-btn" data-tab="appoint">任用管理</button>
+  <button class="tab-btn active" data-tab="appoint">任用一覧</button>
+  <button class="tab-btn" data-tab="intent">年目・任用意向</button>
+  <button class="tab-btn" data-tab="recruit">公募職種</button>
+  <button class="tab-btn" data-tab="reappoint">再度の任用</button>
+  <button class="tab-btn" data-tab="retire">退職・残留</button>
+  <span class="tab-sep" aria-hidden="true"></span>
   <button class="tab-btn" data-tab="eval">人事評価</button>
   <button class="tab-btn" data-tab="exam">採用試験</button>
+  <button class="tab-btn" data-tab="home">状況・手続き</button>
   <button class="tab-btn" data-tab="import">Excel取込</button>
   <button class="tab-btn" data-tab="law">根拠法令</button>
   <button class="tab-btn" data-tab="settings">設定・バックアップ</button>
@@ -34,7 +39,7 @@
 
 <main>
   <!-- ============ ホーム ============ -->
-  <section id="panel-home" class="tab-panel active">
+  <section id="panel-home" class="tab-panel">
     <div id="home-stats" class="stat-grid"></div>
     <div class="card">
       <h2>年度別の状況</h2>
@@ -87,7 +92,7 @@
   </section>
 
   <!-- ============ 任用管理 ============ -->
-  <section id="panel-appoint" class="tab-panel">
+  <section id="panel-appoint" class="tab-panel active">
     <div class="card">
       <div class="card-header-row">
         <h2>任用一覧</h2>
@@ -102,12 +107,94 @@
           </select>
           <label class="checkbox-label inline"><input type="checkbox" id="appoint-issue-only"> 要確認のみ</label>
           <button class="btn-primary" id="btn-appoint-add">任用を登録</button>
-          <button class="btn-secondary" id="btn-next-plan">次年度の任用案を作成</button>
           <button class="btn-secondary" id="btn-appoint-export">任用一覧（様式）で書き出す</button>
         </div>
       </div>
       <p class="hint">総務課の「任用一覧」と同じ項目で管理します。任期は採用の日の属する会計年度の末日まで（【国】地方公務員法第22条の2）。登録時に、勤務時間・給料/報酬額（算定式）・支給日・期末手当・社会保険・雇保/退手・再度の任用の回数を市マニュアルに照らして自動で点検します。「任用一覧（様式）で書き出す」で同じ列構成のExcelを作れます。</p>
       <div id="appoint-table"></div>
+    </div>
+  </section>
+
+  <!-- ============ 年目・任用意向 ============ -->
+  <section id="panel-intent" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2 id="intent-title">年目・再度の任用の可否・本人の希望</h2>
+        <div class="row-actions">
+          <select id="intent-filter">
+            <option value="">すべて</option>
+            <option value="missing">可否・希望が未入力</option>
+            <option value="third">3年目（公募の対象）</option>
+          </select>
+          <button class="btn-secondary" id="btn-intent-export">Excelに書き出す</button>
+        </div>
+      </div>
+      <p class="hint">対象年度に任用のある職員について、3年周期の何年目か・勤続・公募年度を確認し、<strong>再度の任用の可否</strong>と<strong>本人の希望</strong>をその場で選んで入力できます（選ぶと自動で保存）。再度の任用は人事評価の結果と本人の希望により判断します（市マニュアル第Ⅷ章2・申送事項）。3年目の職員は翌年度は公募の対象です（本人の応募は可）。</p>
+      <div id="intent-summary" class="mini-stats"></div>
+      <div id="intent-table"></div>
+    </div>
+  </section>
+
+  <!-- ============ 公募職種 ============ -->
+  <section id="panel-recruit" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2 id="recruit-title">公募する職種の整理</h2>
+        <div class="row-actions">
+          <button class="btn-secondary" id="btn-recruit-add">新規・増員の職を追加</button>
+          <button class="btn-secondary" id="btn-recruit-export">公募職種一覧をExcelに書き出す</button>
+        </div>
+      </div>
+      <p class="hint">翌年度に公募が必要となる職を整理します。現職者が残らない（退職・不可・希望しない）職と、3年目で公募となる職は自動で挙がります。任用希望調査で出た新規・増員の職は手入力で追加します。職ごとに「公募する／しない」を決め、まとめ表から採用試験を作成できます（市マニュアル第Ⅷ章1：〜11月中旬 公募職種及び勤務条件の決定）。</p>
+      <h3>現職者が残らない・公募となる職（自動）</h3>
+      <div id="recruit-needs"></div>
+      <h3>新規・増員の職（手入力）</h3>
+      <div id="recruit-manual"></div>
+      <h3>公募職種のまとめ（所属・業務内容・区分ごと）</h3>
+      <div id="recruit-summary"></div>
+    </div>
+  </section>
+
+  <!-- ============ 再度の任用 ============ -->
+  <section id="panel-reappoint" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2 id="reappoint-title">再度の任用の一覧</h2>
+        <div class="row-actions">
+          <button class="btn-secondary" id="btn-reappoint-export">再度の任用の一覧をExcelに書き出す</button>
+          <button class="btn-primary" id="btn-reappoint-register">チェックした職員を翌年度に登録</button>
+        </div>
+      </div>
+      <p class="hint">「年目・任用意向」で入力した可否と本人の希望、3年周期の年目をもとに、翌年度に公募によらず再度の任用を行う職員の一覧を作ります。可否が「可」・本人が「希望する」・4年目にならない職員が対象です。登録すると翌年度の任用一覧に前年度の条件を引き継いだ任用ができます（年休は翌年度の勤続で再計算）。</p>
+      <div id="reappoint-summary" class="mini-stats"></div>
+      <h3>再度の任用の対象</h3>
+      <div id="reappoint-list"></div>
+      <h3>対象外・確認が必要な職員</h3>
+      <div id="reappoint-excluded"></div>
+    </div>
+  </section>
+
+  <!-- ============ 退職・残留 ============ -->
+  <section id="panel-retire" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2 id="retire-title">退職・残留の管理</h2>
+        <div class="row-actions">
+          <select id="retire-filter">
+            <option value="">すべて</option>
+            <option value="stay">残る（登録済み）</option>
+            <option value="stay_expected">残る見込み</option>
+            <option value="public">公募の対象</option>
+            <option value="leave_expected">残らない見込み</option>
+            <option value="leave">残らない（退職登録済み）</option>
+            <option value="undecided">未定</option>
+          </select>
+          <button class="btn-secondary" id="btn-retire-export">Excelに書き出す</button>
+        </div>
+      </div>
+      <p class="hint">対象年度の職員が翌年度に残るか・残らないかを一覧で管理します。任期満了・自己都合などの退職は「退職を登録」から記録し、退職手続き（申送事項「退職処理」）の進み具合もチェックできます。年度途中の退職は任期の終了日を退職日に変更します。任期満了退職者は各課からの合議がないため、ここで確認してください（申送事項）。</p>
+      <div id="retire-summary" class="mini-stats"></div>
+      <div id="retire-table"></div>
     </div>
   </section>
 
@@ -205,11 +292,14 @@
     <div class="card">
       <h2>使い方</h2>
       <ol class="help-list">
-        <li><strong>はじめに</strong>：「Excel取込」→「任用一覧（総務課の様式）」で、過去の任用一覧を古い年度から順に読み込みます。人事評価の結果もExcelから取り込めます（手入力でも登録できます）。</li>
-        <li><strong>任用</strong>：「任用管理」で任用一覧の項目（区分・所属・任用期間・勤務時間・基礎額・給料/報酬・期末手当・保険など）を登録します。入力画面の下に市マニュアルによる判定（報酬の算定式、支給日、期末手当、社会保険、雇保/退手、切替時期）が出るので、「判定結果を入力欄に反映」で入力できます。会計年度を超える任期、フル／パートの勤務時間の不一致、任期の重複はエラーになります。年度途中の延長は「任期更新」を使います。</li>
-        <li><strong>人事評価</strong>：「人事評価」で年度ごとに評価を入力します。評価結果と所見は次年度の任用案に反映されます。</li>
-        <li><strong>次年度の準備</strong>：「任用管理」の「次年度の任用案を作成」で、評価結果・本人の希望・年目をもとに翌年度の任用案を一括作成します。4年目になる（公募によらない再度の任用が連続3回目になる）職員は公募が必要として推薦から外れます。3月の任用一覧は「任用一覧（様式）で書き出す」で作成できます。</li>
-        <li><strong>採用試験</strong>：「採用試験」で試験・選考を登録し、応募者と得点を入力します。合格者は「任用登録」ボタンで職員台帳と任用にそのまま登録できます。</li>
+        <li><strong>はじめに</strong>：「Excel取込」→「任用一覧（総務課の様式）」で、過去の任用一覧を古い年度から順に読み込みます。画面上部の年度ボタンで対象年度を切り替えます。</li>
+        <li><strong>職員台帳</strong>：職員の一覧です。氏名を押すと経歴（働き始め、勤続、年度ごとの所属・職名と変更点、人事評価、応募歴）を確認できます。</li>
+        <li><strong>任用一覧</strong>（起動時の画面）：総務課の任用一覧と同じ項目で年度ごとの任用を管理します。入力画面の下に市マニュアルによる判定が出るので、「判定結果を入力欄に反映」で入力できます。年度途中の延長は「任期更新」を使います。</li>
+        <li><strong>年目・任用意向</strong>：職員ごとに3年周期の何年目か・公募年度・勤続を確認し、再度の任用の可否と本人の希望をその場で選んで入力します（1月の再度の任用に関する通知の準備）。</li>
+        <li><strong>公募職種</strong>：残らない職員・3年目の職員の職と、任用希望調査で出た新規・増員の職を整理し、公募する職種と人数をまとめます。まとめ表から採用試験を作成できます（11月の公募職種の決定）。</li>
+        <li><strong>再度の任用</strong>：可否が「可」・本人が「希望する」・4年目にならない職員の一覧です。チェックして翌年度に登録すると、前年度の条件を引き継いだ任用ができます（3月の任用一覧の作成）。</li>
+        <li><strong>退職・残留</strong>：翌年度に残る人・残らない人を一覧で確認し、任期満了・自己都合などの退職と退職手続きの進み具合を記録します。</li>
+        <li><strong>人事評価・採用試験</strong>：評語の入力、試験・選考の得点入力と合格者の任用登録を行います。</li>
         <li><strong>バックアップ</strong>：作業の終わりに「設定・バックアップ」から保存してください。前回から一定日数が経過すると画面上部に警告が出ます。</li>
       </ol>
       <h3>注意事項</h3>

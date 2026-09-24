@@ -26,6 +26,7 @@
   const RESULT_LABEL = { pending: '未判定', pass: '合格', fail: '不合格', decline: '辞退' };
   const RECOMMEND_LABEL = { yes: '再度の任用可', hold: '要検討', no: '再度の任用不可', '': '未入力' };
   const WISH_LABEL = { yes: '希望する', no: '希望しない', '': '未確認' };
+  const RETIRE_LABEL = { expiry: '任期満了', resign: '自己都合退職', other: 'その他の退職' };
 
   const DEFAULT_SETTINGS = {
     // 常勤職員の1週間当たりの通常の勤務時間（市マニュアル第Ⅰ章2：週38.75時間）
@@ -138,6 +139,8 @@
       evaluations: [],
       exams: [],
       applicants: [],
+      recruitPositions: [],
+      recruitDecisions: {},
       legalTexts: {},
       settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
       lastBackupAt: null,
@@ -148,7 +151,8 @@
     const base = emptyData();
     if (!raw || typeof raw !== 'object') return base;
     const out = { ...base, ...raw };
-    for (const k of ['staff', 'appointments', 'evaluations', 'exams', 'applicants']) {
+    if (!raw.recruitDecisions || typeof raw.recruitDecisions !== 'object') out.recruitDecisions = {};
+    for (const k of ['staff', 'appointments', 'evaluations', 'exams', 'applicants', 'recruitPositions']) {
       if (!Array.isArray(out[k])) out[k] = [];
     }
     out.settings = { ...base.settings, ...(raw.settings || {}) };
@@ -645,6 +649,10 @@
     return data.evaluations.find((e) => e.staffId === staffId && Number(e.fiscalYear) === Number(fy)) || null;
   }
 
+  /** 評語（評価項目・総合評価）が入力されているか。可否・希望だけの記録は評価未入力とみなす */
+  function hasGrades(ev) {
+    return !!(ev && (ev.overall || Object.values(ev.items || {}).some(Boolean)));
+  }
   /** 評価項目の結果から総合評価の目安を出す（段階の平均を四捨五入） */
   function suggestOverall(itemGrades, gradeScale) {
     const idx = Object.values(itemGrades || {})
@@ -664,7 +672,7 @@
       if (fiscalYearOf(a.start) !== Number(fy)) continue;
       if (seen.has(a.staffId)) continue;
       seen.add(a.staffId);
-      if (!evaluationFor(data, a.staffId, fy)) out.push(a);
+      if (!hasGrades(evaluationFor(data, a.staffId, fy))) out.push(a);
     }
     return out;
   }
@@ -720,15 +728,16 @@
       const reasons = [];
       let recommend = true;
       if (already) { recommend = false; reasons.push(`${fyLabel(nextFy)}の任用が登録済み`); }
-      if (!ev) { recommend = false; reasons.push(`${fyLabel(fy)}の人事評価が未入力`); }
-      else {
-        if (ev.recommend === 'no') { recommend = false; reasons.push('評価者の所見：再度の任用不可'); }
-        if (ev.recommend === 'hold') { recommend = false; reasons.push('評価者の所見：要検討'); }
-        if (ev.overall && !settings.reappointGrades.includes(ev.overall)) {
-          recommend = false; reasons.push(`総合評価 ${ev.overall}（推薦基準：${settings.reappointGrades.join('・')}）`);
-        }
-        if (ev.wish === 'no') { recommend = false; reasons.push('本人が再度の任用を希望していない'); }
-        if (!ev.wish) reasons.push('本人の希望が未確認');
+      if (base.retireType) { recommend = false; reasons.push(`退職登録済み（${RETIRE_LABEL[base.retireType] || base.retireType}）`); }
+      // 再度の任用は、人事評価の結果に基づく可否と本人の希望による（市マニュアル第Ⅷ章2・申送事項）
+      if (!ev || !ev.recommend) { recommend = false; reasons.push('再度の任用の可否が未入力'); }
+      else if (ev.recommend === 'no') { recommend = false; reasons.push('再度の任用：不可'); }
+      else if (ev.recommend === 'hold') { recommend = false; reasons.push('再度の任用：要検討'); }
+      if (!ev || !ev.wish) { recommend = false; reasons.push('本人の希望が未確認'); }
+      else if (ev.wish === 'no') { recommend = false; reasons.push('本人が再度の任用を希望していない'); }
+      if (!hasGrades(ev)) reasons.push(`${fyLabel(fy)}の人事評価（評語）が未入力`);
+      else if (ev.overall && !settings.reappointGrades.includes(ev.overall)) {
+        recommend = false; reasons.push(`総合評価 ${ev.overall}（推薦基準：${settings.reappointGrades.join('・')}）`);
       }
       const n = draft.yearInService - 1;
       const limit = settings.reappointLimit;
@@ -737,6 +746,56 @@
       plans.push({ staffId, base, draft, evaluation: ev, recommend, reasons, already, reappointCount: n, overLimit });
     }
     return plans;
+  }
+
+  /* ------------------------------------------------------------
+   * 残る人・残らない人（退職・残留の管理）
+   * ------------------------------------------------------------ */
+  /** 年度内の職員ごとの最後の任用 */
+  function latestAppointmentsOfFy(data, fy) {
+    const map = new Map();
+    for (const a of data.appointments) {
+      if (a.status === 'canceled' || !a.start || fiscalYearOf(a.start) !== Number(fy)) continue;
+      const cur = map.get(a.staffId);
+      if (!cur || a.end > cur.end) map.set(a.staffId, a);
+    }
+    return [...map.values()];
+  }
+  const CONTINUATION_LABEL = {
+    stay: '残る（翌年度の任用登録済み）',
+    stay_expected: '残る見込み（再度の任用）',
+    public: '公募の対象（本人の応募は可）',
+    leave_expected: '残らない見込み',
+    leave: '残らない（退職登録済み）',
+    undecided: '未定（可否・希望の入力待ち）',
+  };
+  /**
+   * fy 年度の職員が翌年度に残るかどうか。
+   * 優先順：翌年度の任用登録 → 退職登録 → 不可・希望しない → 3年目（公募） → 可かつ希望する → 未定
+   */
+  function continuationStatus(data, appt, settings) {
+    const fy = fiscalYearOf(appt.start);
+    const nextFy = fy + 1;
+    const next = data.appointments.filter((a) => a.staffId === appt.staffId && a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === nextFy);
+    const mk = (code, detail) => ({ code, label: CONTINUATION_LABEL[code], detail: detail || '' });
+    if (next.length) return mk('stay', next.some((a) => a.recruitMethod === 'public') ? '公募で採用' : '再度の任用');
+    if (appt.retireType) return mk('leave', `${RETIRE_LABEL[appt.retireType] || ''}${appt.retireDate ? `（${toWarekiShort(appt.retireDate)}）` : ''}`);
+    const ev = evaluationFor(data, appt.staffId, fy);
+    if (ev && ev.wish === 'no') return mk('leave_expected', '本人が希望しない');
+    if (ev && ev.recommend === 'no') return mk('leave_expected', '再度の任用：不可');
+    if (publicRecruitFy(data, appt, settings) === nextFy) return mk('public', `${yearInServiceOf(data, appt)}年目のため${toWarekiShort(fiscalYearStart(nextFy))}は公募`);
+    if (ev && ev.recommend === 'yes' && ev.wish === 'yes') return mk('stay_expected');
+    const missing = [!ev || !ev.recommend ? '可否' : '', !ev || !ev.wish ? '希望' : '', ev && ev.recommend === 'hold' ? '可否が要検討' : ''].filter(Boolean);
+    return mk('undecided', missing.join('・'));
+  }
+  /**
+   * 翌年度に公募が必要となる見込みの職（現職者が残らない・残らない見込み・3年目）。
+   * 新規・増員の職（recruitPositions）は含まない。
+   */
+  function recruitNeeds(data, fy, settings) {
+    return latestAppointmentsOfFy(data, fy)
+      .map((a) => ({ appt: a, status: continuationStatus(data, a, settings) }))
+      .filter((x) => ['leave', 'leave_expected', 'public'].includes(x.status.code));
   }
 
   /* ------------------------------------------------------------
@@ -1234,7 +1293,8 @@
     fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     appointmentStatus, expiringAppointments,
-    evaluationFor, suggestOverall, missingEvaluations, buildNextYearPlan, careerOf, fiscalYearSummary, fiscalYearsInData,
+    evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
+    RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };

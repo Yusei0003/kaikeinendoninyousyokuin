@@ -70,7 +70,7 @@ test('次年度の任用案：評価と上限で推薦可否', () => {
   d.staff.push({ id: 's2', name: '佐藤 一郎' });
   d.appointments.push(appt({ id: 'p1' }));
   d.appointments.push(appt({ id: 'p2', staffId: 's2' }));
-  d.evaluations.push({ id: 'e1', staffId: 's1', fiscalYear: 2026, overall: 'A', recommend: 'yes' });
+  d.evaluations.push({ id: 'e1', staffId: 's1', fiscalYear: 2026, overall: 'A', recommend: 'yes', wish: 'yes' });
   d.evaluations.push({ id: 'e2', staffId: 's2', fiscalYear: 2026, overall: 'D', recommend: 'yes' });
   const plans = C.buildNextYearPlan(d, 2026, d.settings);
   const p1 = plans.find((p) => p.staffId === 's1');
@@ -432,4 +432,46 @@ test('年度別サマリー', () => {
   assert.strictEqual(sm.continuing, 1);
   assert.strictEqual(sm.evaluated, 1);
   assert.deepStrictEqual(C.fiscalYearsInData(d), [2026, 2027]);
+});
+
+test('再度の任用案：可否と本人の希望が両方そろって推薦', () => {
+  const d = baseData();
+  d.appointments.push(appt({ id: 'p' }));
+  d.evaluations.push({ id: 'e', staffId: 's1', fiscalYear: 2026, recommend: 'yes' });
+  let p = C.buildNextYearPlan(d, 2026, d.settings)[0];
+  assert.strictEqual(p.recommend, false);
+  assert.ok(p.reasons.includes('本人の希望が未確認'));
+  d.evaluations[0].wish = 'yes';
+  p = C.buildNextYearPlan(d, 2026, d.settings)[0];
+  assert.strictEqual(p.recommend, true); // 評語が未入力でも可否・希望があれば推薦（注意書きのみ）
+  assert.ok(p.reasons.some((r) => /評語）が未入力/.test(r)));
+  // 可否・希望だけの記録は「評価未入力」扱い
+  assert.strictEqual(C.missingEvaluations(d, 2026).length, 1);
+});
+
+test('残る人・残らない人の判定と公募が必要な職', () => {
+  const d = baseData();
+  ['s2', 's3', 's4', 's5', 's6'].forEach((id) => d.staff.push({ id, name: id }));
+  const a1 = appt({ id: 'a1' }); // 可・希望 → 残る見込み
+  const a2 = appt({ id: 'a2', staffId: 's2' }); // 希望しない → 残らない見込み
+  const a3 = appt({ id: 'a3', staffId: 's3', yearInService: 3, recruitMethod: 'reappoint' }); // 3年目 → 公募
+  const a4 = appt({ id: 'a4', staffId: 's4', retireType: 'resign', retireDate: '2026-10-31', end: '2026-10-31' }); // 退職登録
+  const a5 = appt({ id: 'a5', staffId: 's5' }); // 翌年度登録済み
+  const a5n = appt({ id: 'a5n', staffId: 's5', fiscalYear: 2027, start: '2027-04-01', end: '2028-03-31', recruitMethod: 'reappoint' });
+  const a6 = appt({ id: 'a6', staffId: 's6' }); // 未入力 → 未定
+  d.appointments.push(a1, a2, a3, a4, a5, a5n, a6);
+  d.evaluations.push({ id: 'e1', staffId: 's1', fiscalYear: 2026, recommend: 'yes', wish: 'yes' });
+  d.evaluations.push({ id: 'e2', staffId: 's2', fiscalYear: 2026, recommend: 'yes', wish: 'no' });
+  const code = (a) => C.continuationStatus(d, a, d.settings).code;
+  assert.strictEqual(code(a1), 'stay_expected');
+  assert.strictEqual(code(a2), 'leave_expected');
+  assert.strictEqual(code(a3), 'public');
+  assert.strictEqual(code(a4), 'leave');
+  assert.strictEqual(code(a5), 'stay');
+  assert.strictEqual(code(a6), 'undecided');
+  const needs = C.recruitNeeds(d, 2026, d.settings).map((x) => x.appt.id).sort();
+  assert.deepStrictEqual(needs, ['a2', 'a3', 'a4']);
+  // 退職登録済みの職員は再度の任用案で推薦しない
+  const p4 = C.buildNextYearPlan(d, 2026, d.settings).find((p) => p.staffId === 's4');
+  assert.ok(p4.reasons.some((r) => /退職登録済み/.test(r)));
 });

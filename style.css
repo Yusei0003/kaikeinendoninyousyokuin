@@ -522,3 +522,26 @@ a.name-link:hover { text-decoration: underline; }
 .issue-details { margin: 4px 0 0; }
 .issue-details summary { font-size: 12px; }
 td.issues-cell { min-width: 120px; }
+
+/* ---------- 年目・任用意向／公募職種／再度の任用／退職・残留 ---------- */
+.tab-sep { width: 1px; background: var(--border); margin: 8px 6px; flex: 0 0 1px; }
+.mini-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.mini-stat { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; display: flex; flex-direction: column; min-width: 96px; background: #fff; }
+.mini-stat.ok { border-color: #b7e0c3; background: var(--ok-bg); }
+.mini-stat.warn { border-color: var(--warning-border); background: var(--warning-bg); }
+.mini-stat.err { border-color: #f3c4c4; background: var(--error-bg); }
+.mini-stat.info { border-color: #c7d7fb; background: #f5f8ff; }
+.mini-value { font-size: 17px; font-weight: 700; }
+.mini-label { font-size: 11px; color: var(--muted); }
+.badge.st-ok { background: var(--ok-bg); color: var(--ok); }
+.badge.st-info { background: #dbeafe; color: #1e3a8a; }
+.badge.st-warn { background: #fdf0cf; color: #92400e; }
+.badge.st-err { background: #fbd5d5; color: var(--danger); }
+.badge.st-muted { background: #eef2f7; color: var(--muted); }
+tbody tr.row-info { background: #f5f8ff; }
+select.intent-select.empty { border-color: var(--warning-border); background: var(--warning-bg); }
+.proc-list { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+.proc-list h4 { margin: 0 0 4px; font-size: 13px; }
+#panel-recruit h3, #panel-reappoint h3 { margin-top: 20px; }
+.badge.st-ok, .badge.st-info, .badge.st-warn, .badge.st-err, .badge.st-muted { white-space: normal; display: inline-block; }
+.tabs { flex-wrap: wrap; overflow-x: visible; }

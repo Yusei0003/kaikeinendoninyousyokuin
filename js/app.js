@@ -179,8 +179,8 @@ function initTabs() {
     saveUi({ tab });
   };
   buttons.forEach((b) => b.addEventListener('click', () => activate(b.dataset.tab)));
-  const ui = loadUi();
-  if (ui.tab && document.getElementById(`panel-${ui.tab}`)) activate(ui.tab);
+  // 起動時は常に任用一覧を開く
+  activate('appoint');
   window.activateTab = activate;
 }
 function initFiscalYearPicker() {
@@ -795,31 +795,6 @@ function renderAppointments() {
     DATA.appointments = DATA.appointments.filter((x) => x.id !== a.id);
     saveData();
   }));
-}
-function openNextYearPlan() {
-  const fy = currentFy();
-  const plans = C.buildNextYearPlan(DATA, fy, DATA.settings);
-  if (!plans.length) { alert(`${C.fyLabel(fy)}の任用がありません。`); return; }
-  const body = `<p class="hint">${C.fyLabel(fy)}の任用・人事評価・本人の希望をもとに、${C.fyLabel(fy + 1)}の「再度の任用」案を作ります（市マニュアル第Ⅷ章2：人事評価の結果に基づき判断、公募によらない再度の任用は原則連続2回・最長3会計年度まで）。推薦となった職員には最初からチェックが入っています。登録後は「任用管理」で個別に修正し、年休・保険・切替時期などを確認してください。</p>
-    ${tableHtml(['登録', '氏名', '所属・業務内容', `${C.fyLabel(fy)}の評価`, '本人の希望', `${C.fyLabel(fy + 1)}`, '判定'], plans.map((p, i) => `<tr class="${p.recommend ? '' : 'row-warning'}">
-      <td><input type="checkbox" data-plan="${i}" ${p.recommend ? 'checked' : ''} ${p.already ? 'disabled' : ''}></td>
-      <td>${escapeHtml(staffName(p.staffId))}</td><td>${escapeHtml(p.base.dept)} ${escapeHtml(p.base.title)}</td>
-      <td>${p.evaluation ? `${escapeHtml(p.evaluation.overall || '—')}／${C.RECOMMEND_LABEL[p.evaluation.recommend || '']}` : '未入力'}</td>
-      <td>${p.evaluation ? C.WISH_LABEL[p.evaluation.wish || ''] : '—'}</td>
-      <td>${p.draft.yearInService}年目</td>
-      <td>${p.recommend ? '<span class="badge ok">推薦</span>' : '<span class="badge warn">要検討</span>'}${p.reasons.length ? `<br><small>${p.reasons.map(escapeHtml).join('<br>')}</small>` : ''}</td></tr>`))}
-    <div class="row-actions end"><button class="btn-secondary" id="plan-cancel">閉じる</button><button class="btn-primary" id="plan-save">チェックした任用案を登録</button></div>`;
-  openModal(`${C.fyLabel(fy + 1)}の任用案`, body, { wide: true });
-  document.getElementById('plan-cancel').onclick = closeModal;
-  document.getElementById('plan-save').onclick = () => {
-    const picked = [...document.querySelectorAll('[data-plan]:checked')].map((el) => plans[Number(el.dataset.plan)]);
-    if (!picked.length) { alert('登録する任用案を選んでください。'); return; }
-    for (const p of picked) DATA.appointments.push(p.draft);
-    closeModal();
-    saveData();
-    initFiscalYearPicker();
-    showToast(`${picked.length}件の任用案を登録しました（${C.fyLabel(fy + 1)}）。`);
-  };
 }
 function printConditions(appt) {
   const s = staffById(appt.staffId) || {};
@@ -1532,6 +1507,374 @@ function exportAll() {
 }
 
 /* ------------------------------------------------------------
+ * 年目・任用意向／公募職種／再度の任用／退職・残留
+ * ------------------------------------------------------------ */
+const STATUS_TONE = { stay: 'ok', stay_expected: 'ok', public: 'info', leave_expected: 'warn', leave: 'err', undecided: 'muted' };
+function statusBadge(st) {
+  return `<span class="badge st-${STATUS_TONE[st.code]}">${escapeHtml(C.CONTINUATION_LABEL[st.code])}</span>${st.detail ? `<br><small class="muted">${escapeHtml(st.detail)}</small>` : ''}`;
+}
+function fyShort(fy) { return C.toWarekiShort(C.fiscalYearStart(fy)).replace(/\.4\.1$/, ''); }
+function miniStats(items) {
+  return items.map(([label, value, tone]) => `<div class="mini-stat ${tone || ''}"><span class="mini-value">${value}</span><span class="mini-label">${label}</span></div>`).join('');
+}
+function sortByDept(list) {
+  return list.slice().sort((x, y) => String(x.deptCode || '').localeCompare(String(y.deptCode || '')) || String(x.dept || '').localeCompare(String(y.dept || ''), 'ja')
+    || String(staffName(x.staffId)).localeCompare(staffName(y.staffId), 'ja'));
+}
+/** 可否・希望を評価レコードに保存（評語は変えない） */
+function upsertIntent(staffId, fy, patch) {
+  let ev = C.evaluationFor(DATA, staffId, fy);
+  if (!ev) {
+    ev = { id: C.uid('ev'), staffId, fiscalYear: fy, items: {}, overall: '', recommend: '', wish: '', evaluator: '', evaluatedAt: '', comment: '' };
+    DATA.evaluations.push(ev);
+  }
+  Object.assign(ev, patch);
+  saveData();
+}
+
+/* ---------- 年目・任用意向 ---------- */
+function renderIntent() {
+  const fy = currentFy();
+  document.getElementById('intent-title').textContent = `${fyShort(fy)}年度の職員：年目・再度の任用の可否・本人の希望`;
+  const filter = document.getElementById('intent-filter').value;
+  const all = sortByDept(C.latestAppointmentsOfFy(DATA, fy)).map((a) => {
+    const ev = C.evaluationFor(DATA, a.staffId, fy);
+    return { a, ev, year: C.yearInServiceOf(DATA, a), pfy: C.publicRecruitFy(DATA, a, DATA.settings), st: C.continuationStatus(DATA, a, DATA.settings) };
+  });
+  const cnt = (f) => all.filter(f).length;
+  document.getElementById('intent-summary').innerHTML = miniStats([
+    ['対象の職員', `${all.length}人`],
+    ['可', `${cnt((x) => x.ev && x.ev.recommend === 'yes')}人`, 'ok'],
+    ['不可', `${cnt((x) => x.ev && x.ev.recommend === 'no')}人`],
+    ['要検討', `${cnt((x) => x.ev && x.ev.recommend === 'hold')}人`],
+    ['可否 未入力', `${cnt((x) => !x.ev || !x.ev.recommend)}人`, cnt((x) => !x.ev || !x.ev.recommend) ? 'warn' : ''],
+    ['希望する', `${cnt((x) => x.ev && x.ev.wish === 'yes')}人`, 'ok'],
+    ['希望しない', `${cnt((x) => x.ev && x.ev.wish === 'no')}人`],
+    ['希望 未確認', `${cnt((x) => !x.ev || !x.ev.wish)}人`, cnt((x) => !x.ev || !x.ev.wish) ? 'warn' : ''],
+    ['3年目（公募の対象）', `${cnt((x) => x.pfy === fy + 1)}人`, 'info'],
+  ]);
+  const rows = all.filter((x) => (filter === 'missing' ? !x.ev || !x.ev.recommend || !x.ev.wish : filter === 'third' ? x.pfy === fy + 1 : true));
+  const sel = (sid, key, cur, labels) => `<select class="result-select intent-select${cur ? '' : ' empty'}" data-intent="${sid}" data-key="${key}">${Object.entries(labels).map(([v, l]) => `<option value="${v}"${(cur || '') === v ? ' selected' : ''}>${v === '' ? '未入力' : l}</option>`).join('')}</select>`;
+  document.getElementById('intent-table').innerHTML = tableHtml(
+    ['氏名', '所属', '業務内容', '区分', '3年周期', '公募年度', '勤続', '人事評価', '再度の任用の可否', '本人の希望', `${fyShort(fy + 1)}年度の見込み`],
+    rows.map(({ a, ev, year, pfy, st }) => `<tr class="${pfy === fy + 1 ? 'row-info' : ''}">
+      <td>${nameLink(a.staffId)}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td><td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td>
+      <td><strong>${year}年目</strong></td>
+      <td>${pfy === fy + 1 ? `<span class="badge warn">${fyShort(pfy)}.4 公募</span>` : pfy ? `${fyShort(pfy)}.4` : '-'}</td>
+      <td>${serviceCell(a)}</td>
+      <td>${C.hasGrades(ev) ? `<strong>${escapeHtml(ev.overall || '—')}</strong> ` : '<span class="muted">未入力</span> '}<button class="btn-small" data-eval-open="${a.staffId}">${C.hasGrades(ev) ? '編集' : '入力'}</button></td>
+      <td>${sel(a.staffId, 'recommend', ev && ev.recommend, { '': '', yes: '可', hold: '要検討', no: '不可' })}</td>
+      <td>${sel(a.staffId, 'wish', ev && ev.wish, { '': '', yes: '希望する', no: '希望しない' })}</td>
+      <td>${statusBadge(st)}</td></tr>`),
+    all.length ? '該当する職員はいません。' : `${C.fyLabel(fy)}の任用がありません。`,
+  );
+  const box = document.getElementById('intent-table');
+  box.querySelectorAll('.intent-select').forEach((s) => (s.onchange = () => upsertIntent(s.dataset.intent, fy, { [s.dataset.key]: s.value })));
+  box.querySelectorAll('[data-eval-open]').forEach((b) => (b.onclick = () => openEvalForm(b.dataset.evalOpen, fy)));
+}
+function exportIntent() {
+  const fy = currentFy();
+  const rows = [['職員番号', '氏名', '所属', '業務内容', '区分', '3年周期', '公募年度', '勤続', '総合評価', '再度の任用の可否', '本人の希望', '翌年度の見込み']];
+  for (const a of sortByDept(C.latestAppointmentsOfFy(DATA, fy))) {
+    const s = staffById(a.staffId) || {};
+    const ev = C.evaluationFor(DATA, a.staffId, fy);
+    const pfy = C.publicRecruitFy(DATA, a, DATA.settings);
+    const sy = C.continuousServiceYears(DATA, a);
+    rows.push([s.number || '', s.name || '', a.dept, a.title, C.KUBUN_LABEL[C.kubunOf(a)], `${C.yearInServiceOf(DATA, a)}年目`, pfy ? `${fyShort(pfy)}.4` : '',
+      sy === 0 ? '初年' : `${sy}年`, ev ? ev.overall || '' : '', { yes: '可', hold: '要検討', no: '不可' }[ev && ev.recommend] || '未入力', C.WISH_LABEL[(ev && ev.wish) || ''],
+      C.continuationStatus(DATA, a, DATA.settings).label]);
+  }
+  writeWorkbook(`年目・任用意向_${C.fyLabel(fy)}_${stamp()}.xlsx`, [{ name: '年目・任用意向', rows }]);
+}
+
+/* ---------- 公募職種 ---------- */
+const DECISION_LABEL = { public: '公募する', none: '公募しない（職の廃止・統合など）', '': '未定' };
+function recruitItems(fy) {
+  const nextFy = fy + 1;
+  const auto = C.recruitNeeds(DATA, fy, DATA.settings).map(({ appt, status }) => {
+    const key = `${nextFy}:${appt.id}`;
+    const dec = DATA.recruitDecisions[key] || {};
+    return {
+      kind: 'auto', key, appt, status, dept: appt.dept, deptCode: appt.deptCode, title: appt.title, kubun: C.kubunOf(appt),
+      hours: C.hoursOf(appt) != null ? C.hoursOf(appt) : appt.hoursText || '', baseAmount: appt.baseAmount, count: 1,
+      decision: dec.decision != null ? dec.decision : 'public', note: dec.note || '',
+    };
+  });
+  const manual = DATA.recruitPositions.filter((r) => Number(r.fy) === nextFy).map((r) => ({
+    kind: 'manual', key: r.id, pos: r, dept: r.dept, deptCode: r.deptCode, title: r.title, kubun: r.kubun, hours: r.weeklyHours, baseAmount: r.baseAmount,
+    count: Number(r.count) || 1, decision: r.decision != null ? r.decision : 'public', note: r.note || '',
+  }));
+  return { nextFy, auto, manual };
+}
+function recruitGroups(items) {
+  const map = new Map();
+  for (const it of items.filter((x) => x.decision === 'public')) {
+    const k = `${it.dept}|${it.title}|${it.kubun}`;
+    const g = map.get(k) || { dept: it.dept, deptCode: it.deptCode, title: it.title, kubun: it.kubun, count: 0, hours: new Set(), sources: [] };
+    g.count += it.count;
+    if (it.hours !== '' && it.hours != null) g.hours.add(it.hours);
+    g.sources.push(it);
+    map.set(k, g);
+  }
+  return [...map.values()].sort((a, b) => String(a.deptCode || '').localeCompare(String(b.deptCode || '')) || String(a.dept).localeCompare(String(b.dept), 'ja'));
+}
+function renderRecruit() {
+  const fy = currentFy();
+  const { nextFy, auto, manual } = recruitItems(fy);
+  document.getElementById('recruit-title').textContent = `${fyShort(nextFy)}年度に公募する職種の整理（${fyShort(fy)}年度の職員から）`;
+  const decSel = (key, cur, kind) => `<select class="result-select" data-dec="${key}" data-kind="${kind}">${Object.entries(DECISION_LABEL).map(([v, l]) => `<option value="${v}"${cur === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+  document.getElementById('recruit-needs').innerHTML = tableHtml(
+    ['所属', '業務内容', '区分', '時間/週', '基礎額', '現職者', '理由', '判断'],
+    sortByDept(auto.map((x) => ({ ...x, staffId: x.appt.staffId }))).map((x) => `<tr class="${x.decision === '' ? 'row-warning' : x.decision === 'none' ? 'row-muted' : ''}">
+      <td>${escapeHtml(x.dept)}</td><td>${escapeHtml(x.title)}</td><td>${C.KUBUN_LABEL[x.kubun]}</td><td>${escapeHtml(x.hours)}</td>
+      <td class="num">${x.baseAmount ? Number(x.baseAmount).toLocaleString('ja-JP') : ''}</td>
+      <td>${nameLink(x.appt.staffId)}</td><td>${statusBadge(x.status)}</td><td>${decSel(x.key, x.decision, 'auto')}</td></tr>`),
+    '現職者が残らない・公募となる職はありません（「年目・任用意向」「退職・残留」の入力に応じて挙がります）。',
+  );
+  document.getElementById('recruit-manual').innerHTML = tableHtml(
+    ['所属', '業務内容', '区分', '時間/週', '人数', '基礎額', '備考', '判断', ''],
+    manual.map((x) => `<tr class="${x.decision === '' ? 'row-warning' : x.decision === 'none' ? 'row-muted' : ''}">
+      <td>${escapeHtml(x.dept)}</td><td>${escapeHtml(x.title)}</td><td>${C.KUBUN_LABEL[x.kubun] || ''}</td><td>${escapeHtml(x.hours)}</td><td>${x.count}人</td>
+      <td class="num">${x.baseAmount ? Number(x.baseAmount).toLocaleString('ja-JP') : ''}</td><td>${escapeHtml(x.note)}</td><td>${decSel(x.key, x.decision, 'manual')}</td>
+      <td class="actions"><button class="btn-small" data-rp-edit="${x.key}">編集</button><button class="btn-danger" data-rp-del="${x.key}">削除</button></td></tr>`),
+    '新規・増員の職はありません。「新規・増員の職を追加」から登録します。',
+  );
+  const groups = recruitGroups(auto.concat(manual));
+  const undecided = auto.concat(manual).filter((x) => x.decision === '').length;
+  document.getElementById('recruit-summary').innerHTML = (undecided ? `<p class="warn-text">判断が「未定」の職が${undecided}件あります。</p>` : '') + tableHtml(
+    ['所属', '業務内容', '区分', '時間/週', '募集人数', '内訳', '採用試験'],
+    groups.map((g, i) => {
+      const examName = `${C.fyLabel(nextFy)} ${g.dept} ${g.title} 採用選考`;
+      const exists = DATA.exams.find((e) => e.name === examName);
+      return `<tr><td>${escapeHtml(g.dept)}</td><td>${escapeHtml(g.title)}</td><td>${C.KUBUN_LABEL[g.kubun] || ''}</td><td>${[...g.hours].map(escapeHtml).join('・')}</td>
+        <td><strong>${g.count}人</strong></td>
+        <td><small>${g.sources.map((s) => (s.kind === 'auto' ? `${escapeHtml(staffName(s.appt.staffId))}の後任` : `新規・増員${s.count}人`)).join('、')}</small></td>
+        <td>${exists ? `<button class="btn-small" data-goto-exam="${exists.id}">作成済み（開く）</button>` : `<button class="btn-small" data-make-exam="${i}">採用試験を作成</button>`}</td></tr>`;
+    }),
+    '公募する職はありません。',
+  );
+  const panel = document.getElementById('panel-recruit');
+  panel.querySelectorAll('[data-dec]').forEach((s) => (s.onchange = () => {
+    if (s.dataset.kind === 'auto') DATA.recruitDecisions[s.dataset.dec] = { ...(DATA.recruitDecisions[s.dataset.dec] || {}), decision: s.value };
+    else DATA.recruitPositions.find((r) => r.id === s.dataset.dec).decision = s.value;
+    saveData();
+  }));
+  panel.querySelectorAll('[data-rp-edit]').forEach((b) => (b.onclick = () => openRecruitForm(DATA.recruitPositions.find((r) => r.id === b.dataset.rpEdit))));
+  panel.querySelectorAll('[data-rp-del]').forEach((b) => (b.onclick = () => {
+    if (!confirm('この職を削除しますか？')) return;
+    DATA.recruitPositions = DATA.recruitPositions.filter((r) => r.id !== b.dataset.rpDel);
+    saveData();
+  }));
+  panel.querySelectorAll('[data-make-exam]').forEach((b) => (b.onclick = () => {
+    const g = groups[Number(b.dataset.makeExam)];
+    const exam = {
+      id: C.uid('ex'), name: `${C.fyLabel(nextFy)} ${g.dept} ${g.title} 採用選考`, method: 'selection', dept: g.dept, title: g.title,
+      type: g.kubun === 'full' ? 'full' : 'part', positions: g.count, stages: ['書類', '面接'], status: 'open', note: '公募職種の整理から作成',
+    };
+    DATA.exams.push(exam);
+    selectedExamId = exam.id;
+    saveData();
+    window.activateTab('exam');
+    showToast('採用試験を作成しました。募集期間・試験日を入力してください。');
+  }));
+  panel.querySelectorAll('[data-goto-exam]').forEach((b) => (b.onclick = () => { selectedExamId = b.dataset.gotoExam; renderExams(); window.activateTab('exam'); }));
+}
+function openRecruitForm(pos) {
+  const nextFy = currentFy() + 1;
+  openForm(pos ? '新規・増員の職を編集' : `${fyShort(nextFy)}年度の新規・増員の職を追加`, [
+    { key: 'deptCode', label: '所属CD' },
+    { key: 'dept', label: '所属名', required: true },
+    { key: 'title', label: '業務内容', required: true },
+    { key: 'kubun', label: '区分', type: 'select', options: Object.entries(C.KUBUN_LABEL) },
+    { key: 'weeklyHours', label: '勤務時間/週', placeholder: '例：30、随時' },
+    { key: 'count', label: '募集人数', type: 'number', required: true },
+    { key: 'baseAmount', label: '基礎額（円）', type: 'number' },
+    { key: 'decision', label: '判断', type: 'select', options: Object.entries(DECISION_LABEL) },
+    { key: 'note', label: '備考（任用希望調査の回答など）', type: 'textarea', full: true },
+  ], pos || { kubun: 'part_monthly', count: 1, decision: 'public' }, (v) => {
+    if (pos) Object.assign(pos, v);
+    else DATA.recruitPositions.push({ id: C.uid('rp'), fy: nextFy, ...v });
+    saveData();
+    return undefined;
+  }, { wide: true });
+}
+function exportRecruit() {
+  const fy = currentFy();
+  const { nextFy, auto, manual } = recruitItems(fy);
+  const rows = [['所属CD', '所属', '業務内容', '区分', '勤務時間/週', '募集人数', '内訳']];
+  for (const g of recruitGroups(auto.concat(manual))) {
+    rows.push([g.deptCode || '', g.dept, g.title, C.KUBUN_LABEL[g.kubun] || '', [...g.hours].join('・'), g.count,
+      g.sources.map((s) => (s.kind === 'auto' ? `${staffName(s.appt.staffId)}の後任（${s.status.label}）` : `新規・増員${s.count}人${s.note ? `：${s.note}` : ''}`)).join('／')]);
+  }
+  const detail = [['区分', '所属', '業務内容', '現職者', '理由', '判断', '備考']];
+  for (const x of auto) detail.push(['自動', x.dept, x.title, staffName(x.appt.staffId), `${x.status.label}${x.status.detail ? `（${x.status.detail}）` : ''}`, DECISION_LABEL[x.decision], x.note]);
+  for (const x of manual) detail.push(['新規・増員', x.dept, x.title, '', `${x.count}人`, DECISION_LABEL[x.decision], x.note]);
+  writeWorkbook(`${fyShort(nextFy)}年度_公募職種一覧_${stamp()}.xlsx`, [{ name: '公募職種一覧', rows }, { name: '内訳', rows: detail }]);
+}
+
+/* ---------- 再度の任用 ---------- */
+let reappointPlans = [];
+function renderReappoint() {
+  const fy = currentFy();
+  const nextFy = fy + 1;
+  document.getElementById('reappoint-title').textContent = `${fyShort(nextFy)}年度の再度の任用の一覧（${fyShort(fy)}年度の職員から）`;
+  reappointPlans = C.buildNextYearPlan(DATA, fy, DATA.settings);
+  const registered = sortByDept(DATA.appointments.filter((a) => a.status !== 'canceled' && a.start && C.fiscalYearOf(a.start) === nextFy && a.recruitMethod === 'reappoint'));
+  const todo = reappointPlans.filter((p) => p.recommend && !p.already);
+  const excluded = reappointPlans.filter((p) => !p.recommend && !p.already);
+  document.getElementById('reappoint-summary').innerHTML = miniStats([
+    [`${fyShort(fy)}年度の職員`, `${reappointPlans.length}人`],
+    ['再度の任用の対象（未登録）', `${todo.length}人`, todo.length ? 'ok' : ''],
+    [`${fyShort(nextFy)}年度に登録済み`, `${registered.length}人`, 'ok'],
+    ['対象外・要確認', `${excluded.length}人`, excluded.length ? 'warn' : ''],
+  ]);
+  const ev = (p) => p.evaluation;
+  document.getElementById('reappoint-list').innerHTML = tableHtml(
+    ['登録', '氏名', '所属', '業務内容', '区分', `${fyShort(nextFy)}年度`, '人事評価', '可否', '本人の希望', '状態', '注意'],
+    todo.map((p) => `<tr>
+      <td><input type="checkbox" data-plan-id="${p.draft.id}" checked></td>
+      <td>${nameLink(p.staffId)}</td><td>${escapeHtml(p.base.dept)}</td><td>${escapeHtml(p.base.title)}</td><td>${C.KUBUN_LABEL[C.kubunOf(p.base)]}</td>
+      <td>${p.draft.yearInService}年目</td><td>${escapeHtml((ev(p) && ev(p).overall) || '—')}</td><td>可</td><td>希望する</td>
+      <td><span class="badge warn">未登録</span></td><td><small class="muted">${p.reasons.map(escapeHtml).join('<br>')}</small></td></tr>`)
+      .concat(registered.map((a) => {
+        const e = C.evaluationFor(DATA, a.staffId, fy);
+        return `<tr><td></td><td>${nameLink(a.staffId)}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td><td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td>
+          <td>${C.yearInServiceOf(DATA, a)}年目</td><td>${escapeHtml((e && e.overall) || '—')}</td><td>${{ yes: '可', hold: '要検討', no: '不可' }[e && e.recommend] || '—'}</td>
+          <td>${C.WISH_LABEL[(e && e.wish) || '']}</td><td><span class="badge ok">登録済み</span></td><td>${a.ukagai ? '' : '<small class="muted">任用伺い未受理</small>'}</td></tr>`;
+      })),
+    '再度の任用の対象はいません。「年目・任用意向」で可否と本人の希望を入力してください。',
+  );
+  document.getElementById('reappoint-excluded').innerHTML = tableHtml(
+    ['氏名', '所属', '業務内容', `${fyShort(nextFy)}年度`, '理由'],
+    excluded.map((p) => `<tr class="row-warning"><td>${nameLink(p.staffId)}</td><td>${escapeHtml(p.base.dept)}</td><td>${escapeHtml(p.base.title)}</td>
+      <td>${p.draft.yearInService}年目${p.overLimit ? ' <span class="badge warn">公募</span>' : ''}</td><td><small>${p.reasons.map(escapeHtml).join('<br>')}</small></td></tr>`),
+    '対象外・確認が必要な職員はいません。',
+  );
+}
+function registerReappoint() {
+  const ids = [...document.querySelectorAll('[data-plan-id]:checked')].map((c) => c.dataset.planId);
+  const picked = reappointPlans.filter((p) => ids.includes(p.draft.id));
+  if (!picked.length) { alert('登録する職員にチェックを入れてください。'); return; }
+  const nextFy = currentFy() + 1;
+  if (!confirm(`${picked.length}人を${C.fyLabel(nextFy)}の任用（再度の任用）として登録します。よろしいですか？`)) return;
+  for (const p of picked) DATA.appointments.push(p.draft);
+  saveData();
+  initFiscalYearPicker();
+  showToast(`${picked.length}人を${C.fyLabel(nextFy)}に登録しました。`);
+}
+function exportReappoint() {
+  const fy = currentFy();
+  const nextFy = fy + 1;
+  const rows = [['職員番号', '氏名', '所属', '業務内容', '区分', `${C.fyLabel(nextFy)}の年目`, '総合評価', '可否', '本人の希望', '状態']];
+  for (const p of C.buildNextYearPlan(DATA, fy, DATA.settings).filter((x) => x.recommend && !x.already)) {
+    const s = staffById(p.staffId) || {};
+    rows.push([s.number || '', s.name || '', p.base.dept, p.base.title, C.KUBUN_LABEL[C.kubunOf(p.base)], `${p.draft.yearInService}年目`, (p.evaluation && p.evaluation.overall) || '', '可', '希望する', '未登録']);
+  }
+  for (const a of DATA.appointments.filter((x) => x.status !== 'canceled' && x.start && C.fiscalYearOf(x.start) === nextFy && x.recruitMethod === 'reappoint')) {
+    const s = staffById(a.staffId) || {};
+    const e = C.evaluationFor(DATA, a.staffId, fy);
+    rows.push([s.number || '', s.name || '', a.dept, a.title, C.KUBUN_LABEL[C.kubunOf(a)], `${C.yearInServiceOf(DATA, a)}年目`, (e && e.overall) || '',
+      { yes: '可', hold: '要検討', no: '不可' }[e && e.recommend] || '', C.WISH_LABEL[(e && e.wish) || ''], '登録済み']);
+  }
+  writeWorkbook(`${fyShort(nextFy)}年度_再度の任用の一覧_${stamp()}.xlsx`, [{ name: '再度の任用', rows }]);
+}
+
+/* ---------- 退職・残留 ---------- */
+/** 退職処理（申送事項）。resignOnly は自己都合等のみ（任期満了では省略） */
+const RETIRE_PROCS = [
+  { key: 'copy', label: '伺い（回議用紙・退職願）のコピー', resignOnly: true },
+  { key: 'jinji', label: '人事システムに終了日等を入力（書類管理・配置・職名・雇用保険・休暇管理・任用）' },
+  { key: 'rireki', label: '履歴管理システムに「辞職を承認する」を入力', resignOnly: true },
+  { key: 'notice', label: '本人通知（退職）を伺いに添付し決裁' },
+  { key: 'soshitsu', label: '雇用保険・社会保険の喪失届（電子申請）' },
+  { key: 'rishoku', label: '離職票の作成・送付（59歳以上の退職者のみ）' },
+];
+function retireProcsFor(type) { return RETIRE_PROCS.filter((p) => type !== 'expiry' || !p.resignOnly); }
+function renderRetire() {
+  const fy = currentFy();
+  const nextFy = fy + 1;
+  document.getElementById('retire-title').textContent = `${fyShort(fy)}年度の職員の退職・残留（${fyShort(nextFy)}年度に残るか）`;
+  const filter = document.getElementById('retire-filter').value;
+  const all = sortByDept(C.latestAppointmentsOfFy(DATA, fy)).map((a) => ({ a, st: C.continuationStatus(DATA, a, DATA.settings) }));
+  const cnt = (code) => all.filter((x) => x.st.code === code).length;
+  document.getElementById('retire-summary').innerHTML = miniStats([
+    ['残る（登録済み）', `${cnt('stay')}人`, 'ok'],
+    ['残る見込み', `${cnt('stay_expected')}人`, 'ok'],
+    ['公募の対象', `${cnt('public')}人`, 'info'],
+    ['残らない見込み', `${cnt('leave_expected')}人`, cnt('leave_expected') ? 'warn' : ''],
+    ['残らない（退職登録済み）', `${cnt('leave')}人`, cnt('leave') ? 'err' : ''],
+    ['未定', `${cnt('undecided')}人`, cnt('undecided') ? 'warn' : ''],
+  ]);
+  const rows = all.filter((x) => !filter || x.st.code === filter);
+  document.getElementById('retire-table').innerHTML = tableHtml(
+    ['氏名', '所属', '業務内容', '区分', '任期', '3年周期', `${fyShort(nextFy)}年度の見込み`, '退職', '退職手続き', ''],
+    rows.map(({ a, st }) => {
+      const procs = a.retireType ? retireProcsFor(a.retireType) : [];
+      const done = procs.filter((p) => (a.retireProcs || {})[p.key]).length;
+      return `<tr class="${st.code === 'leave' ? 'row-error' : st.code === 'leave_expected' || st.code === 'undecided' ? 'row-warning' : ''}">
+        <td>${nameLink(a.staffId)}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td><td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td>
+        <td>${C.toWarekiShort(a.start)}～${C.toWarekiShort(a.end)}${a.originalEnd ? `<br><small class="muted">当初 ～${C.toWarekiShort(a.originalEnd)}</small>` : ''}</td>
+        <td>${C.yearInServiceOf(DATA, a)}年目</td>
+        <td>${statusBadge(st)}</td>
+        <td>${a.retireType ? `${C.RETIRE_LABEL[a.retireType]}<br><small>${C.toWarekiShort(a.retireDate)}</small>` : '<span class="muted">-</span>'}</td>
+        <td>${a.retireType ? `<span class="badge ${done === procs.length ? 'ok' : 'warn'}">${done}/${procs.length}</span>` : '<span class="muted">-</span>'}</td>
+        <td class="actions">${st.code === 'stay' ? '' : `<button class="btn-small" data-retire="${a.id}">${a.retireType ? '退職の編集' : '退職を登録'}</button>`}</td></tr>`;
+    }),
+    all.length ? '該当する職員はいません。' : `${C.fyLabel(fy)}の任用がありません。`,
+  );
+  document.querySelectorAll('#retire-table [data-retire]').forEach((b) => (b.onclick = () => openRetireForm(DATA.appointments.find((a) => a.id === b.dataset.retire))));
+}
+function openRetireForm(appt) {
+  const fullEnd = appt.originalEnd || appt.end;
+  const values = {
+    retireType: appt.retireType || 'expiry',
+    retireDate: appt.retireDate || fullEnd,
+    retireNote: appt.retireNote || '',
+  };
+  const procHtml = (type) => `<div class="proc-list"><h4>退職手続き（申送事項「退職処理」）</h4>${retireProcsFor(type).map((p) =>
+    `<label class="checkbox-label"><input type="checkbox" data-proc="${p.key}"${(appt.retireProcs || {})[p.key] ? ' checked' : ''}> ${escapeHtml(p.label)}</label>`).join('')}</div>`;
+  openForm(`退職の登録：${staffName(appt.staffId)}（${C.toWarekiShort(appt.start)}～${C.toWarekiShort(fullEnd)}）`, [
+    { key: 'retireType', label: '退職事由', type: 'select', options: Object.entries(C.RETIRE_LABEL) },
+    { key: 'retireDate', label: '退職日（任期の最終日）', type: 'date', required: true, hint: '任期満了は任期の終了日。年度途中の退職は、任期の終了日をこの日に変更します' },
+    { key: 'retireNote', label: '備考', type: 'textarea', full: true },
+  ], values, (v) => {
+    if (v.retireDate < appt.start || v.retireDate > fullEnd) return `<p class="error-text">退職日は任期（${appt.start}～${fullEnd}）の範囲で入力してください。</p>`;
+    const procs = {};
+    document.querySelectorAll('[data-proc]').forEach((c) => { procs[c.dataset.proc] = c.checked; });
+    if (v.retireDate < fullEnd) { appt.originalEnd = fullEnd; appt.end = v.retireDate; } else { appt.end = fullEnd; delete appt.originalEnd; }
+    Object.assign(appt, { retireType: v.retireType, retireDate: v.retireDate, retireNote: v.retireNote, retireProcs: procs });
+    saveData();
+    showToast('退職を登録しました。');
+    return undefined;
+  }, { wide: true, after: `<div id="proc-area">${procHtml(values.retireType)}</div>
+    ${appt.retireType ? '<button type="button" class="btn-danger" id="retire-clear">退職の登録を取り消す</button>' : ''}` });
+  document.getElementById('f-retireType').addEventListener('change', (e) => {
+    document.getElementById('proc-area').innerHTML = procHtml(e.target.value);
+    if (e.target.value === 'expiry') document.getElementById('f-retireDate').value = fullEnd;
+  });
+  const clear = document.getElementById('retire-clear');
+  if (clear) clear.onclick = () => {
+    if (!confirm('退職の登録を取り消し、任期を元に戻しますか？')) return;
+    appt.end = fullEnd;
+    for (const k of ['originalEnd', 'retireType', 'retireDate', 'retireNote', 'retireProcs']) delete appt[k];
+    closeModal();
+    saveData();
+  };
+}
+function exportRetire() {
+  const fy = currentFy();
+  const rows = [['職員番号', '氏名', '所属', '業務内容', '区分', '任期（自）', '任期（至）', '3年周期', '翌年度の見込み', '詳細', '退職事由', '退職日', '手続き完了']];
+  for (const a of sortByDept(C.latestAppointmentsOfFy(DATA, fy))) {
+    const s = staffById(a.staffId) || {};
+    const st = C.continuationStatus(DATA, a, DATA.settings);
+    const procs = a.retireType ? retireProcsFor(a.retireType) : [];
+    rows.push([s.number || '', s.name || '', a.dept, a.title, C.KUBUN_LABEL[C.kubunOf(a)], a.start, a.end, `${C.yearInServiceOf(DATA, a)}年目`, st.label, st.detail,
+      a.retireType ? C.RETIRE_LABEL[a.retireType] : '', a.retireDate || '', a.retireType ? `${procs.filter((p) => (a.retireProcs || {})[p.key]).length}/${procs.length}` : '']);
+  }
+  writeWorkbook(`退職・残留_${C.fyLabel(fy)}_${stamp()}.xlsx`, [{ name: '退職・残留', rows }]);
+}
+
+/* ------------------------------------------------------------
  * 初期化
  * ------------------------------------------------------------ */
 function renderAll() {
@@ -1543,6 +1886,10 @@ function renderAll() {
   renderEvaluations();
   renderExams();
   renderLaws();
+  renderIntent();
+  renderRecruit();
+  renderReappoint();
+  renderRetire();
 }
 function init() {
   loadData();
@@ -1565,7 +1912,6 @@ function init() {
   document.getElementById('staff-search').oninput = renderStaff;
 
   document.getElementById('btn-appoint-add').onclick = () => openAppointForm(null);
-  document.getElementById('btn-next-plan').onclick = openNextYearPlan;
   ['appoint-search', 'appoint-status-filter', 'appoint-issue-only'].forEach((id) => {
     document.getElementById(id).addEventListener('input', renderAppointments);
     document.getElementById(id).addEventListener('change', renderAppointments);
@@ -1586,6 +1932,14 @@ function init() {
   };
 
   document.getElementById('btn-exam-add').onclick = () => openExamForm(null);
+  document.getElementById('intent-filter').onchange = renderIntent;
+  document.getElementById('btn-intent-export').onclick = exportIntent;
+  document.getElementById('btn-recruit-add').onclick = () => openRecruitForm(null);
+  document.getElementById('btn-recruit-export').onclick = exportRecruit;
+  document.getElementById('btn-reappoint-register').onclick = registerReappoint;
+  document.getElementById('btn-reappoint-export').onclick = exportReappoint;
+  document.getElementById('retire-filter').onchange = renderRetire;
+  document.getElementById('btn-retire-export').onclick = exportRetire;
 
   document.getElementById('import-file').onchange = onImportFile;
   document.getElementById('import-kind').onchange = renderImportPreview;
