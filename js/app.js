@@ -372,7 +372,7 @@ function staffFields() {
     { key: 'kana', label: 'ふりがな' },
     { key: 'gender', label: '性別', type: 'select', options: GENDER_OPTIONS },
     { key: 'birth', label: '生年月日', type: 'date' },
-    { key: 'hireDate', label: '採用日（人事システム）', type: 'date' },
+    { key: 'hireDate', label: '採用日（人事システム：最初に採用された日）', type: 'date', hint: '任用履歴がない場合、勤続（年休の継続勤務年数）の起算に使います' },
     { key: 'retireDate', label: '退職日（人事システム）', type: 'date' },
     { key: 'jobType', label: '職種' },
     { key: 'postal', label: '郵便番号' },
@@ -430,7 +430,7 @@ function renderStaff() {
       return `<tr><td>${escapeHtml(s.number)}</td><td>${nameLink(s.id)}</td><td>${escapeHtml(s.kana)}</td>
         <td>${GENDER_LABEL[s.gender || ''] || dash}</td><td>${s.birth ? C.toWarekiShort(s.birth) : dash}</td><td>${s.hireDate ? C.toWarekiShort(s.hireDate) : dash}</td>
         <td>${fa ? `${escapeHtml(fa.dept)} ${escapeHtml(fa.title)}` : '<span class="muted">—</span>'}</td>
-        <td>${appts.length ? C.toWarekiShort(appts[0].start) : '<span class="muted">—</span>'}</td>
+        <td>${(() => { const f = [s.hireDate, appts.length ? appts[0].start : ''].filter((x) => C.parseISO(x)).sort()[0]; return f ? C.toWarekiShort(f) : '<span class="muted">—</span>'; })()}</td>
         <td>${sy == null ? '<span class="muted">—</span>' : sy === 0 ? '初年' : `${sy}年`}</td>
         <td>${fys.size}年度</td>
         <td>${evs[0] ? `${C.fyLabel(Number(evs[0].fiscalYear))}：${escapeHtml(evs[0].overall || '—')}` : '<span class="muted">—</span>'}</td>
@@ -493,8 +493,8 @@ function openStaffDetail(staffId) {
   }).join('');
   const body = `
     <div class="sum-grid">
-      ${card('働き始め（初回任用）', wareki(sm.firstStart), [sm.fiscalYears ? `任用のある年度：${sm.fiscalYears}年度分` : '', s.hireDate ? `名簿の採用日：${C.toWarekiShort(s.hireDate)}` : ''].filter(Boolean).join('<br>'))}
-      ${card('勤続（切れ目なく継続）', sm.serviceStart ? `${wareki(sm.serviceStart)}から` : '—', sm.serviceYears == null ? '' : `継続勤務年数 ${sm.serviceYears === 0 ? '初年' : `${sm.serviceYears}年`}${sm.serviceEstimated ? '（年目から推定）' : ''}`)}
+      ${card('働き始め（最初の採用）', wareki(sm.firstStart), [sm.firstStartSource === 'roster' ? '職員名簿の採用日' : 'このアプリの最初の任用', sm.fiscalYears ? `任用のある年度：${sm.fiscalYears}年度分` : ''].filter(Boolean).join('<br>'))}
+      ${card('勤続（切れ目なく継続）', sm.serviceStart ? `${wareki(sm.serviceStart)}から` : '—', sm.serviceYears == null ? '' : `継続勤務年数 ${sm.serviceYears === 0 ? '初年' : `${sm.serviceYears}年`}${sm.serviceSource === 'roster' ? '（名簿の採用日から通算）' : sm.serviceEstimated ? '（年目から推定）' : sm.serviceSource === 'manual' ? '（勤続開始日の入力値）' : ''}`)}
       ${card(sm.current ? '現在の所属・職名' : '直近の所属・職名', cur ? `${escapeHtml(cur.dept || '—')}` : '—', cur ? `${escapeHtml(cur.title || '')}・${C.KUBUN_LABEL[C.kubunOf(cur)]}` : '')}
       ${card('3年周期', sm.cycleYear ? `${sm.cycleYear}年目` : '—', sm.publicFy ? `${C.toWarekiShort(C.fiscalYearStart(sm.publicFy)).replace(/\.1$/, '')} に公募` : '')}
       ${card('変更の回数', `所属 ${sm.deptChanges}回・職名 ${sm.titleChanges}回`, '')}
@@ -570,7 +570,7 @@ function appointFields() {
     { key: 'staffId', label: '職員', type: 'select', options: staffOptions(), required: true },
     { key: 'recruitMethod', label: '採用方法', type: 'select', options: Object.entries(C.RECRUIT_LABEL) },
     { key: 'yearInService', label: '会計年度（3年周期の何年目）', type: 'number', hint: '公募の判断用。採用月にかかわらず採用した年度を1年目と数え、公募で1年目に戻る（例：R5.11採用→R5が1年目、R8.4に公募）。空欄なら任用履歴から自動計算' },
-    { key: 'serviceStart', label: '勤続開始日（履歴がない場合）', type: 'date', hint: '公募をまたいで切れ目なく勤務している場合の最初の任用日。空欄なら任用履歴から自動計算（年休に使用）' },
+    { key: 'serviceStart', label: '勤続開始日（途中で途切れた場合など）', type: 'date', hint: '空欄なら任用履歴→職員名簿の採用日の順で自動計算（年休に使用）。採用後に途切れがあり、履歴がない場合に入力' },
     { key: 'fullTimeStart', label: 'フルタイム継続開始日（履歴がない場合）', type: 'date', hint: 'フルタイムで切れ目なく勤務している最初の任用日。空欄なら任用履歴から自動計算（退手・共済の切替に使用）' },
     { key: 'ukagai', label: '任用伺い 受理済み（○）', type: 'checkbox' },
     { type: 'heading', label: '所属・業務' },
@@ -659,7 +659,7 @@ function judgeHtml(j) {
       <dt>雇保→退手 切替</dt><dd><strong>${j.sw.taishu}</strong> <small class="muted">6月経過</small></dd>
       <dt>健保→共済 切替</dt><dd><strong>${j.sw.kyosai}</strong> <small class="muted">12月経過</small></dd>` : ''}
     <dt>健康診断・ストレスチェック</dt><dd>${j.health ? '<strong>対象</strong>' : '対象外'} <small class="muted">第Ⅶ章4（任用1年かつ週29時間以上）</small></dd>
-    <dt>勤続（継続勤務）</dt><dd>${j.service ? `${j.service.date}から${j.service.manual ? '（入力値）' : j.service.estimated ? '（年目から推定）' : ''}・継続勤務年数 ${j.serviceYears === 0 ? '任用の日' : `${j.serviceYears}年`}` : '—'} <small class="muted">公募をまたいでも切れ目がなければ通算（年休・退手・共済に使用）</small></dd>
+    <dt>勤続（継続勤務）</dt><dd>${j.service ? `${j.service.date}から${j.service.manual ? '（入力値）' : j.service.source === 'roster' ? '（職員名簿の採用日から）' : j.service.estimated ? '（年目から推定）' : ''}・継続勤務年数 ${j.serviceYears === 0 ? '任用の日' : `${j.serviceYears}年`}` : '—'} <small class="muted">公募をまたいでも切れ目がなければ通算（年休・退手・共済に使用）</small></dd>
     <dt>3年周期の年目（公募の判断）</dt><dd>${j.year ? `${j.year}年目` : '—'}${j.publicFy ? `・<strong>${C.toWarekiShort(C.fiscalYearStart(j.publicFy)).replace(/\.1$/, '')}に公募</strong>` : ''} <small class="muted">第Ⅷ章2（公募で1年目に戻る）</small></dd>
   </dl>
   <button type="button" class="btn-secondary" id="judge-apply">判定結果を入力欄に反映</button>
@@ -779,7 +779,8 @@ function serviceCell(a) {
   const ss = C.serviceStartOf(DATA, a, false);
   if (!ss) return '<span class="muted">-</span>';
   const y = C.continuousServiceYears(DATA, a);
-  return `<span title="${ss.date}から${ss.estimated ? '（推定）' : ''}">${y === 0 ? '初年' : `${y}年`}${ss.estimated ? '<small class="muted">推</small>' : ''}</span>`;
+  const mark = ss.source === 'roster' ? '<small class="muted" title="職員名簿の採用日から通算">名</small>' : ss.estimated ? '<small class="muted" title="3年周期の年目から推定">推</small>' : '';
+  return `<span title="${ss.date}から${ss.source === 'roster' ? '（名簿の採用日から）' : ss.estimated ? '（推定）' : ''}">${y === 0 ? '初年' : `${y}年`}${mark}</span>`;
 }
 function renderAppointments() {
   const rows = filteredAppointments();

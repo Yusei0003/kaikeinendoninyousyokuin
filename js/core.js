@@ -283,8 +283,11 @@
    * （公募の判断に使う3年周期の年目 yearInServiceOf とは別に数える）
    *  - 同じ職員の任用を、前の任期の翌日に始まるものを切れ目なしとしてさかのぼる。
    *  - さかのぼった中に「勤続開始日」の入力（overrideKey）があればそれを使う。
-   *  - 履歴がない場合、最も古い任用が4月1日開始なら、その3年周期の年目の分だけ4月1日にさかのぼって推定する。
-   * fullOnly：フルタイムの任用だけをたどる（退手・共済の切替用）
+   *  - さかのぼった先がその職員の最初の任用（それより前の履歴がない）で、職員名簿の採用日（最初に採用された日）が
+   *    それより前なら、採用日から通算する（source: 'roster'）。途中で途切れていれば「勤続開始日」を入力する。
+   *  - 採用日もない場合、最も古い任用が4月1日開始なら、その3年周期の年目の分だけ4月1日にさかのぼって推定する。
+   * fullOnly：フルタイムの任用だけをたどる（退手・共済の切替用。名簿の採用日はフルかどうか分からないため使わない）
+   * 戻り値：{ date, estimated, manual, source: 'manual'|'history'|'roster'|'estimate' }
    */
   function serviceStartOf(data, appt, fullOnly) {
     if (!parseISO(appt.start)) return null;
@@ -293,16 +296,23 @@
       .filter((a) => a.status !== 'canceled' && a.id !== appt.id && (!fullOnly || a.type === 'full'));
     let cur = appt;
     for (;;) {
-      if (parseISO(cur[key])) return { date: cur[key], estimated: false, manual: true };
+      if (parseISO(cur[key])) return { date: cur[key], estimated: false, manual: true, source: 'manual' };
       const prev = list.find((a) => a.end === addDaysISO(cur.start, -1));
       if (!prev) break;
       cur = prev;
     }
+    if (!fullOnly) {
+      const staff = (data.staff || []).find((x) => x.id === appt.staffId);
+      const earlier = appointmentsOfStaff(data, appt.staffId).some((a) => a.status !== 'canceled' && a.id !== cur.id && a.start < cur.start);
+      if (staff && parseISO(staff.hireDate) && staff.hireDate < cur.start && !earlier) {
+        return { date: staff.hireDate, estimated: false, manual: false, source: 'roster' };
+      }
+    }
     const y = yearInServiceOf(data, cur);
     if (y > 1 && cur.start.slice(5) === '04-01') {
-      return { date: fiscalYearStart(fiscalYearOf(cur.start) - (y - 1)), estimated: true, manual: false };
+      return { date: fiscalYearStart(fiscalYearOf(cur.start) - (y - 1)), estimated: true, manual: false, source: 'estimate' };
     }
-    return { date: cur.start, estimated: false, manual: false };
+    return { date: cur.start, estimated: false, manual: false, source: 'history' };
   }
   /** フルタイムとして継続して勤務している開始日（退手・共済の切替の起算日） */
   function fullTimeServiceStart(data, appt) {
@@ -617,10 +627,15 @@
     const last = list[list.length - 1] || null;
     const current = todayISO ? list.find((a) => a.start <= todayISO && todayISO <= a.end) || null : null;
     const ss = last ? serviceStartOf(data, last, false) : null;
+    const staff = (data.staff || []).find((x) => x.id === staffId);
+    const firstAppt = list.length ? list[0].start : null;
+    const hire = staff && parseISO(staff.hireDate) ? staff.hireDate : null;
     return {
       rows,
       summary: {
-        firstStart: list.length ? list[0].start : null,
+        firstStart: hire && (!firstAppt || hire < firstAppt) ? hire : firstAppt,
+        firstStartSource: hire && (!firstAppt || hire <= firstAppt) ? 'roster' : 'history',
+        serviceSource: ss ? ss.source : null,
         serviceStart: ss ? ss.date : null,
         serviceEstimated: ss ? ss.estimated : false,
         serviceYears: last ? continuousServiceYears(data, last) : null,

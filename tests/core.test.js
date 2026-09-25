@@ -552,3 +552,40 @@ test('会計年度任用職員以外の職員は保存データからも除く',
   assert.deepStrictEqual(d.appointments.map((a) => a.id), ['y']);
   assert.strictEqual(d.evaluations.length, 0);
 });
+
+test('名簿の採用日（最初に採用された日）から勤続を通算する', () => {
+  const d = baseData();
+  d.staff[0].hireDate = '2020-04-01';
+  const r8 = appt({ id: 'r8', yearInService: 1, type: 'full', payType: 'monthly', weeklyHours: 38.75 });
+  d.appointments.push(r8);
+  // 履歴がなくても採用日から：R2.4.1〜R8.4.1 で6年 → 年休20日
+  const ss = C.serviceStartOf(d, r8, false);
+  assert.strictEqual(ss.date, '2020-04-01');
+  assert.strictEqual(ss.source, 'roster');
+  assert.strictEqual(C.continuousServiceYears(d, r8), 6);
+  assert.strictEqual(C.annualLeaveDays(d, r8, d.settings), 20);
+  // 退手・共済（フルの継続）には採用日を使わない
+  assert.strictEqual(C.fullTimeServiceStart(d, r8).date, '2026-04-01');
+  // 3年周期（公募の判断）は別：1年目のまま
+  assert.strictEqual(C.yearInServiceOf(d, r8), 1);
+  // 働き始めは採用日
+  assert.strictEqual(C.careerOf(d, 's1', d.settings, '2026-06-01').summary.firstStart, '2020-04-01');
+});
+
+test('採用日より後の履歴に途切れがあれば、採用日ではなく途切れた後から数える', () => {
+  const d = baseData();
+  d.staff[0].hireDate = '2020-04-01';
+  d.appointments.push(appt({ id: 'old', fiscalYear: 2020, start: '2020-04-01', end: '2021-03-31', recruitMethod: 'public' }));
+  const r8 = appt({ id: 'r8', recruitMethod: 'public' }); // R3〜R7は任用なし
+  d.appointments.push(r8);
+  assert.strictEqual(C.serviceStartOf(d, r8, false).date, '2026-04-01');
+  assert.strictEqual(C.continuousServiceYears(d, r8), 0);
+  // 勤続開始日を入力すればそれが優先
+  assert.strictEqual(C.serviceStartOf(d, { ...r8, serviceStart: '2024-04-01' }, false).date, '2024-04-01');
+  // 採用日が任用より後（データの食い違い）は使わない
+  const d2 = baseData();
+  d2.staff[0].hireDate = '2026-10-01';
+  const a = appt({ id: 'a' });
+  d2.appointments.push(a);
+  assert.strictEqual(C.serviceStartOf(d2, a, false).date, '2026-04-01');
+});
