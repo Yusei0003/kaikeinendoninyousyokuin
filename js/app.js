@@ -374,7 +374,6 @@ function staffFields() {
     { key: 'birth', label: '生年月日', type: 'date' },
     { key: 'hireDate', label: '採用日（人事システム）', type: 'date' },
     { key: 'retireDate', label: '退職日（人事システム）', type: 'date' },
-    { key: 'category', label: '区分名', placeholder: '会計年度任用職員' },
     { key: 'jobType', label: '職種' },
     { key: 'postal', label: '郵便番号' },
     { key: 'address', label: '住所', full: true },
@@ -395,7 +394,7 @@ function openStaffForm(staff, afterSave) {
     }
     let saved;
     if (isNew) {
-      saved = { id: C.uid('st'), ...v, createdAt: new Date().toISOString() };
+      saved = { id: C.uid('st'), ...v, category: '会計年度任用職員', createdAt: new Date().toISOString() };
       DATA.staff.push(saved);
     } else {
       Object.assign(staff, v);
@@ -1177,8 +1176,7 @@ function renderImportPreview() {
 }
 /** 人事システムの職員名簿の取込確認 */
 function renderMeiboPreview(box, ws) {
-  const includeOthers = document.getElementById('import-include-others').checked;
-  const res = C.parseMeibo(sheetRows(ws), includeOthers);
+  const res = C.parseMeibo(sheetRows(ws));
   importState.result = res;
   importState.kind = 'meibo';
   if (res.error) { box.innerHTML = `<p class="error-text">${escapeHtml(res.error)}</p>`; return; }
@@ -1189,9 +1187,9 @@ function renderMeiboPreview(box, ws) {
     <div class="import-summary">
       <div><strong>見出し行：</strong>${res.headerRow + 1}行目／<strong>取込対象：</strong>${res.records.length}人（職員台帳に新規 ${plan.add}人・更新 ${plan.update}人）</div>
       <div><strong>読み込む項目：</strong>番号・氏名・ﾌﾘｶﾞﾅ・性別（1＝男性、0/2＝女性）・生年月日・採用日・退職日・区分名・職種・所属・職名・係・級・号・在職・郵便番号・住所・電話・携帯・Mail・緊急時連絡先</div>
-      <div class="muted">PASS・内線等・財務・労務・経歴などの列は読み込みません。既存の職員とは職員番号 → 氏名と生年月日の順で照合し、名簿の値で上書きします。</div>
+      <div class="muted">C列（区分名）が「会計年度任用職員」の行だけを対象にします。PASS・内線等・財務・労務・経歴などの列は読み込みません。既存の職員とは職員番号 → 氏名と生年月日の順で照合し、名簿の値で上書きします。</div>
     </div>
-    ${res.excluded.length ? `<details><summary>会計年度任用職員以外のため取り込まない行（${res.excluded.length}件）</summary><ul>${res.excluded.map((x) => `<li>${x.row}行目 ${escapeHtml(x.name)}：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
+    ${res.excludedCount ? `<p class="muted">C列（区分名）が「会計年度任用職員」ではない行が${res.excludedCount}件あります。これらの行は内容を読まずに除外しました。</p>` : ''}
     ${res.skipped.length ? `<details><summary>取り込まない行（${res.skipped.length}件）</summary><ul>${res.skipped.map((x) => `<li>${x.row}行目：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
     ${tableHtml(['行', '番号', '氏名', 'ﾌﾘｶﾞﾅ', '性別', '生年月日', '採用日', '退職日', '所属', '職名', '在職', '職員台帳'],
       res.records.slice(0, 100).map((r) => {
@@ -1201,7 +1199,7 @@ function renderMeiboPreview(box, ws) {
           <td>${escapeHtml(r.dept)}${r.section ? `<br><small>${escapeHtml(r.section)}</small>` : ''}</td><td>${escapeHtml(r.title)}</td><td>${escapeHtml(r.inService)}</td>
           <td>${hit ? `<span class="badge">更新</span> ${escapeHtml(hit.name)}` : '<span class="badge ok">新規</span>'}</td></tr>`;
       }),
-      '取り込む職員がいません（会計年度任用職員の行がない場合は「会計年度任用職員以外も取り込む」を確認してください）。')}
+      '取り込む職員がいません（C列の区分名が「会計年度任用職員」の行がありません）。')}
     ${res.records.length > 100 ? `<p class="muted">先頭100件を表示しています（全${res.records.length}件）。</p>` : ''}
     <div class="row-actions"><button class="btn-primary" id="btn-import-run"${res.records.length ? '' : ' disabled'}>この内容で取り込む</button></div>`;
   document.getElementById('btn-import-run').onclick = runImport;
@@ -2067,7 +2065,6 @@ function init() {
   document.getElementById('import-kind').onchange = renderImportPreview;
   document.getElementById('import-sheet').onchange = renderImportPreview;
   document.getElementById('import-create-staff').onchange = renderImportPreview;
-  document.getElementById('import-include-others').onchange = renderImportPreview;
   document.getElementById('btn-import-template').onclick = downloadImportTemplate;
 
   document.getElementById('btn-backup').onclick = doBackup;

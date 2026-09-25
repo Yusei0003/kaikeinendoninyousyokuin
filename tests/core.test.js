@@ -487,10 +487,12 @@ const MEIBO_ROWS = [
 ];
 
 test('職員名簿：会計年度任用職員だけを読み、必要な情報を持ってくる（PASS等は読まない）', () => {
-  const res = C.parseMeibo(MEIBO_ROWS, false);
+  const res = C.parseMeibo(MEIBO_ROWS);
   assert.ifError(res.error);
   assert.strictEqual(res.records.length, 2);
-  assert.strictEqual(res.excluded.length, 1);
+  assert.strictEqual(res.excludedCount, 1);
+  assert.ok(!res.records.some((r) => r.name === '架空　正子'));
+  assert.ok(res.records.every((r) => r.category === '会計年度任用職員'));
   const [a, b] = res.records;
   assert.strictEqual(a.number, '90101');
   assert.strictEqual(a.gender, 'F');
@@ -506,15 +508,20 @@ test('職員名簿：会計年度任用職員だけを読み、必要な情報�
   assert.strictEqual(b.gender, 'M');
   assert.strictEqual(b.birth, '1990-01-20');
   assert.strictEqual(b.hireDate, '2026-10-01');
-  // 区分を問わず取り込む設定
-  assert.strictEqual(C.parseMeibo(MEIBO_ROWS, true).records.length, 3);
+  // 「会計年度」を含むだけの別の区分・空欄は対象外
+  const others = [MEIBO_HEADER, meiboRow({ 番号: 1, 区分名: '会計年度任用職員（旧臨時）', 氏名: 'x', 採用日: '2026/4/1' }), meiboRow({ 番号: 2, 区分名: '', 氏名: 'y', 採用日: '2026/4/1' })];
+  assert.strictEqual(C.parseMeibo(others).records.length, 0);
+  assert.strictEqual(C.parseMeibo(others).excludedCount, 2);
+  // 区分名の見出しがなくてもC列で判定
+  const noHeader = MEIBO_ROWS.map((r, i) => (i === 0 ? r.map((h) => (h === '区分名' ? '' : h)) : r));
+  assert.strictEqual(C.parseMeibo(noHeader).records.length, 2);
 });
 
 test('職員名簿：既存の職員との照合（番号→氏名と生年月日）と任用登録の確認', () => {
   const d = C.emptyData();
   d.staff.push({ id: 'a', number: '90101', name: '架空　一子' });
   d.staff.push({ id: 'b', number: '', name: '架空 二郎' }); // 任用一覧から先に取り込んだ職員（番号なし）
-  const [r1, r2] = C.parseMeibo(MEIBO_ROWS, false).records;
+  const [r1, r2] = C.parseMeibo(MEIBO_ROWS).records;
   assert.strictEqual(C.findStaffForMeibo(d, r1).id, 'a');
   assert.strictEqual(C.findStaffForMeibo(d, r2).id, 'b');
   d.appointments.push({ id: 'x', staffId: 'a', start: '2026-04-01', end: '2027-03-31' });
@@ -533,4 +540,15 @@ test('和暦表記（令和・平成・昭和）と読み戻し', () => {
   for (const iso of ['2026-04-01', '2019-04-01', '1990-06-01', '1985-05-10']) {
     assert.strictEqual(C.excelValueToISO(C.toWarekiShort(iso)), iso);
   }
+});
+
+test('会計年度任用職員以外の職員は保存データからも除く', () => {
+  const d = C.normalizeData({
+    staff: [{ id: 'k', name: 'a', category: '会計年度任用職員' }, { id: 'n', name: 'b' }, { id: 'o', name: 'c', category: '正職員' }],
+    appointments: [{ id: 'x', staffId: 'o' }, { id: 'y', staffId: 'k' }],
+    evaluations: [{ id: 'e', staffId: 'o' }],
+  });
+  assert.deepStrictEqual(d.staff.map((s) => s.id), ['k', 'n']);
+  assert.deepStrictEqual(d.appointments.map((a) => a.id), ['y']);
+  assert.strictEqual(d.evaluations.length, 0);
 });

@@ -164,6 +164,13 @@
     for (const k of ['staff', 'appointments', 'evaluations', 'exams', 'applicants', 'recruitPositions']) {
       if (!Array.isArray(out[k])) out[k] = [];
     }
+    // 会計年度任用職員以外（区分名が入っていて別の区分）の職員は扱わない
+    const others = new Set(out.staff.filter((s) => s.category && !isMeiboTarget(s.category)).map((s) => s.id));
+    if (others.size) {
+      out.staff = out.staff.filter((s) => !others.has(s.id));
+      out.appointments = out.appointments.filter((a) => !others.has(a.staffId));
+      out.evaluations = out.evaluations.filter((e) => !others.has(e.staffId));
+    }
     out.settings = { ...base.settings, ...(raw.settings || {}) };
     out.legalTexts = { ...(raw.legalTexts || {}) };
     return out;
@@ -1324,9 +1331,14 @@
   }
   /**
    * 名簿の行データを取込用レコードに変換する。
-   * includeOthers=false のときは区分名に「会計年度」を含む行だけを対象にする。
+   * このアプリは会計年度任用職員の管理用のため、C列（区分名）が「会計年度任用職員」の行だけを読む。
+   * それ以外の行（正職員など）は、氏名を含め一切の値を読まずに件数だけ数える。
    */
-  function parseMeibo(rows, includeOthers) {
+  const MEIBO_TARGET_CATEGORY = '会計年度任用職員';
+  function isMeiboTarget(v) {
+    return String(v == null ? '' : v).normalize('NFKC').replace(/\s/g, '') === MEIBO_TARGET_CATEGORY;
+  }
+  function parseMeibo(rows) {
     let headerRow = -1;
     const map = {};
     for (let r = 0; r < Math.min(rows.length, 10); r++) {
@@ -1339,20 +1351,20 @@
       });
       break;
     }
-    if (headerRow < 0) return { records: [], skipped: [], excluded: [], error: '「氏名」と「採用日」（または「生年月日」）の見出しがある行が見つかりません。職員名簿の形式か確認してください。' };
+    if (headerRow < 0) return { records: [], skipped: [], excludedCount: 0, error: '「氏名」と「採用日」（または「生年月日」）の見出しがある行が見つかりません。職員名簿の形式か確認してください。' };
+    // 区分名の列（見出しがなければC列）
+    if (map.category === undefined) map.category = 2;
     const get = (row, f) => (map[f] === undefined ? '' : row[map[f]]);
     const records = [];
     const skipped = [];
-    const excluded = [];
+    let excludedCount = 0;
     for (let r = headerRow + 1; r < rows.length; r++) {
       const row = rows[r] || [];
-      const name = cellText(get(row, 'name'));
-      if (!name) { if (row.some((c) => c != null && c !== '')) skipped.push({ row: r + 1, reason: '氏名が空欄' }); continue; }
+      if (!row.some((c) => c != null && c !== '')) continue;
       const category = cellText(get(row, 'category'));
-      if (!includeOthers && map.category !== undefined && !/会計年度/.test(category)) {
-        excluded.push({ row: r + 1, name, reason: `区分名が「${category || '空欄'}」` });
-        continue;
-      }
+      if (!isMeiboTarget(category)) { excludedCount += 1; continue; }
+      const name = cellText(get(row, 'name'));
+      if (!name) { skipped.push({ row: r + 1, reason: '氏名が空欄' }); continue; }
       const addr = [cellText(get(row, 'address1')), cellText(get(row, 'address2'))].filter(Boolean).join('　');
       const inService = cellText(get(row, 'inService'));
       records.push({
@@ -1364,7 +1376,7 @@
         birth: excelValueToISO(get(row, 'birth')),
         hireDate: excelValueToISO(get(row, 'hireDate')),
         retireDate: excelValueToISO(get(row, 'retireDate')),
-        category,
+        category: MEIBO_TARGET_CATEGORY,
         jobType: cellText(get(row, 'jobType')),
         deptCode: cellText(get(row, 'deptCode')),
         dept: cellText(get(row, 'dept')),
@@ -1383,7 +1395,7 @@
         emergencyPhone: cellText(get(row, 'emergencyPhone')),
       });
     }
-    return { records, skipped, excluded, headerRow, map };
+    return { records, skipped, excludedCount, headerRow, map };
   }
   /** 名簿で職員を探す：職員番号 → 氏名と生年月日 → 氏名（1人に決まる場合） */
   function findStaffForMeibo(data, rec) {
@@ -1428,7 +1440,7 @@
     kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
     fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
-    parseMeibo, parseMeiboGender, findStaffForMeibo, hasAppointmentOn,
+    parseMeibo, parseMeiboGender, isMeiboTarget, findStaffForMeibo, hasAppointmentOn,
     appointmentStatus, expiringAppointments,
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
