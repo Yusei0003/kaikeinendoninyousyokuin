@@ -248,6 +248,10 @@ function upcomingProcedures(t, days) {
     if (a.start >= t && a.start <= limit && !a.ukagai) out.push({ date: a.start, name, staffId: a.staffId, what: `任用伺いが未受理（${a.dept} ${a.title}）`, basis: '申送事項（3月下旬 任用起案）' });
     if (/保育士/.test(a.title || '') && String(a.hoikushiCheck || '') !== '済') out.push({ date: a.start, name, staffId: a.staffId, what: '保育士特定登録取消者管理システムの確認が未済', basis: '任用一覧の確認項目' });
   }
+  for (const s of hiresWithoutAppointment()) {
+    if (s.hireDate < C.addDaysISO(t, -days) || s.hireDate > limit) continue;
+    out.push({ date: s.hireDate, name: s.name, staffId: s.id, what: `任用が未登録（名簿の採用日。${s.rosterDept || ''} ${s.rosterTitle || ''}）`, basis: '職員名簿の取込' });
+  }
   return out.sort((x, y) => x.date.localeCompare(y.date));
 }
 function renderHome() {
@@ -368,8 +372,18 @@ function staffFields() {
     { key: 'kana', label: 'ふりがな' },
     { key: 'gender', label: '性別', type: 'select', options: GENDER_OPTIONS },
     { key: 'birth', label: '生年月日', type: 'date' },
-    { key: 'phone', label: '連絡先' },
+    { key: 'hireDate', label: '採用日（人事システム）', type: 'date' },
+    { key: 'retireDate', label: '退職日（人事システム）', type: 'date' },
+    { key: 'category', label: '区分名', placeholder: '会計年度任用職員' },
+    { key: 'jobType', label: '職種' },
+    { key: 'postal', label: '郵便番号' },
     { key: 'address', label: '住所', full: true },
+    { key: 'phone', label: '電話' },
+    { key: 'mobile', label: '携帯' },
+    { key: 'email', label: 'メール' },
+    { key: 'emergencyName', label: '緊急時連絡先（氏名）' },
+    { key: 'emergencyRelation', label: '緊急時連絡先（続柄）' },
+    { key: 'emergencyPhone', label: '緊急時連絡先（電話）' },
     { key: 'note', label: '備考', type: 'textarea', full: true },
   ];
 }
@@ -404,7 +418,7 @@ function renderStaff() {
     .filter((s) => !q || [s.number, s.name, s.kana].some((x) => String(x || '').replace(/[\s　]/g, '').includes(q)))
     .sort((a, b) => String(a.kana || a.name).localeCompare(String(b.kana || b.name), 'ja'));
   document.getElementById('staff-table').innerHTML = tableHtml(
-    ['番号', '氏名', 'ふりがな', `${C.fyLabel(fy)}の所属・職名`, '働き始め', '勤続', '任用年度数', '直近の評価', ''],
+    ['番号', '氏名', 'ふりがな', '性別', '生年月日', '採用日', `${C.fyLabel(fy)}の所属・職名`, '働き始め', '勤続', '任用年度数', '直近の評価', ''],
     list.map((s) => {
       const appts = C.appointmentsOfStaff(DATA, s.id).filter((a) => a.status !== 'canceled');
       const cur = appts.find((a) => C.appointmentStatus(a, t) === 'active');
@@ -413,7 +427,9 @@ function renderStaff() {
       const fa = inFy(s.id) || (fyOnly ? null : cur);
       const last = appts[appts.length - 1];
       const sy = last ? C.continuousServiceYears(DATA, last) : null;
+      const dash = '<span class="muted">—</span>';
       return `<tr><td>${escapeHtml(s.number)}</td><td>${nameLink(s.id)}</td><td>${escapeHtml(s.kana)}</td>
+        <td>${GENDER_LABEL[s.gender || ''] || dash}</td><td>${s.birth ? C.toWarekiShort(s.birth) : dash}</td><td>${s.hireDate ? C.toWarekiShort(s.hireDate) : dash}</td>
         <td>${fa ? `${escapeHtml(fa.dept)} ${escapeHtml(fa.title)}` : '<span class="muted">—</span>'}</td>
         <td>${appts.length ? C.toWarekiShort(appts[0].start) : '<span class="muted">—</span>'}</td>
         <td>${sy == null ? '<span class="muted">—</span>' : sy === 0 ? '初年' : `${sy}年`}</td>
@@ -446,6 +462,13 @@ function nameLink(staffId, label) {
 }
 const CHANGE_LABEL = { first: '初任用', gap: '途切れ', dept: '所属変更', title: '職名変更', kubun: '区分変更', hours: '時間変更', pay: '報酬変更', public: '公募', renew: '任期更新' };
 function wareki(iso) { return iso ? C.formatDateJa(iso) : '—'; }
+function ageOn(birth, iso) {
+  const b = C.parseISO(birth);
+  const d = C.parseISO(iso);
+  let y = d.getFullYear() - b.getFullYear();
+  if (d.getMonth() < b.getMonth() || (d.getMonth() === b.getMonth() && d.getDate() < b.getDate())) y -= 1;
+  return y;
+}
 function openStaffDetail(staffId) {
   const s = staffById(staffId);
   if (!s) return;
@@ -471,7 +494,7 @@ function openStaffDetail(staffId) {
   }).join('');
   const body = `
     <div class="sum-grid">
-      ${card('働き始め（初回任用）', wareki(sm.firstStart), sm.fiscalYears ? `任用のある年度：${sm.fiscalYears}年度分` : '')}
+      ${card('働き始め（初回任用）', wareki(sm.firstStart), [sm.fiscalYears ? `任用のある年度：${sm.fiscalYears}年度分` : '', s.hireDate ? `名簿の採用日：${C.toWarekiShort(s.hireDate)}` : ''].filter(Boolean).join('<br>'))}
       ${card('勤続（切れ目なく継続）', sm.serviceStart ? `${wareki(sm.serviceStart)}から` : '—', sm.serviceYears == null ? '' : `継続勤務年数 ${sm.serviceYears === 0 ? '初年' : `${sm.serviceYears}年`}${sm.serviceEstimated ? '（年目から推定）' : ''}`)}
       ${card(sm.current ? '現在の所属・職名' : '直近の所属・職名', cur ? `${escapeHtml(cur.dept || '—')}` : '—', cur ? `${escapeHtml(cur.title || '')}・${C.KUBUN_LABEL[C.kubunOf(cur)]}` : '')}
       ${card('3年周期', sm.cycleYear ? `${sm.cycleYear}年目` : '—', sm.publicFy ? `${C.toWarekiShort(C.fiscalYearStart(sm.publicFy)).replace(/\.1$/, '')} に公募` : '')}
@@ -480,9 +503,18 @@ function openStaffDetail(staffId) {
     <dl class="kv compact">
       <dt>職員番号</dt><dd>${escapeHtml(s.number) || '—'}</dd>
       <dt>ふりがな</dt><dd>${escapeHtml(s.kana) || '—'}</dd>
-      <dt>生年月日</dt><dd>${s.birth ? C.formatDateJa(s.birth) : '—'}</dd>
-      <dt>連絡先</dt><dd>${escapeHtml(s.phone) || '—'}</dd>
+      <dt>性別</dt><dd>${GENDER_LABEL[s.gender || ''] || '—'}</dd>
+      <dt>生年月日</dt><dd>${s.birth ? `${C.formatDateJa(s.birth)}（${ageOn(s.birth, t)}歳）` : '—'}</dd>
+      <dt>採用日（人事システム）</dt><dd>${s.hireDate ? C.formatDateJa(s.hireDate) : '—'}</dd>
+      <dt>退職日（人事システム）</dt><dd>${s.retireDate ? C.formatDateJa(s.retireDate) : '—'}</dd>
+      <dt>区分・職種</dt><dd>${escapeHtml([s.category, s.jobType].filter(Boolean).join('・')) || '—'}</dd>
+      <dt>名簿の所属・職名</dt><dd>${escapeHtml([s.rosterDept, s.rosterSection, s.rosterTitle].filter(Boolean).join(' ')) || '—'}</dd>
+      <dt>住所</dt><dd>${escapeHtml([s.postal ? `〒${s.postal}` : '', s.address].filter(Boolean).join(' ')) || '—'}</dd>
+      <dt>電話・携帯</dt><dd>${escapeHtml([s.phone, s.mobile].filter(Boolean).join('／')) || '—'}</dd>
+      <dt>メール</dt><dd>${escapeHtml(s.email) || '—'}</dd>
+      <dt>緊急時連絡先</dt><dd>${escapeHtml([s.emergencyName, s.emergencyRelation ? `（${s.emergencyRelation}）` : '', s.emergencyPhone].filter(Boolean).join(' ')) || '—'}</dd>
     </dl>
+    ${s.rosterImportedAt ? `<p class="muted">人事システムの名簿から取込：${new Date(s.rosterImportedAt).toLocaleDateString('ja-JP')}</p>` : ''}
     <h4>経歴（新しい順）</h4>
     ${career.rows.length ? `<ol class="timeline">${timeline}</ol>` : '<p class="empty">任用の記録はありません。</p>'}
     <h4>人事評価</h4>
@@ -1100,6 +1132,13 @@ async function onImportFile() {
     importState = { wb, fileName: file.name };
     const sel = document.getElementById('import-sheet');
     sel.innerHTML = wb.SheetNames.map((n) => `<option>${escapeHtml(n)}</option>`).join('');
+    // 見出しから名簿・任用一覧を自動判別（データのあるシートを選ぶ）
+    const withData = wb.SheetNames.find((n) => wb.Sheets[n]['!ref']);
+    if (withData) sel.value = withData;
+    const head = (sheetRows(wb.Sheets[sel.value]).slice(0, 10) || []).map((r) => (r || []).map((c) => String(c == null ? '' : c).normalize('NFKC').replace(/\s/g, '')));
+    const has = (h) => head.some((r) => r.includes(h));
+    if (has('氏名') && has('区分名') && has('採用日')) document.getElementById('import-kind').value = 'meibo';
+    else if (has('氏名') && has('任用期間')) document.getElementById('import-kind').value = 'ninyoIchiran';
     renderImportPreview();
   } catch (e) {
     document.getElementById('import-preview').innerHTML = `<p class="error-text">ファイルを読み込めませんでした：${escapeHtml(e.message)}</p>`;
@@ -1111,6 +1150,7 @@ function renderImportPreview() {
   const kind = document.getElementById('import-kind').value;
   const ws = importState.wb.Sheets[document.getElementById('import-sheet').value];
   if (kind === 'ninyoIchiran') { renderIchiranPreview(box, ws); return; }
+  if (kind === 'meibo') { renderMeiboPreview(box, ws); return; }
   const res = C.rowsToRecords(sheetRows(ws), kind, DATA.settings);
   importState.result = res;
   importState.kind = kind;
@@ -1134,6 +1174,55 @@ function renderImportPreview() {
     ${res.records.length > 50 ? `<p class="muted">先頭50件を表示しています（全${res.records.length}件）。</p>` : ''}
     <div class="row-actions"><button class="btn-primary" id="btn-import-run">この内容で取り込む</button></div>`;
   document.getElementById('btn-import-run').onclick = runImport;
+}
+/** 人事システムの職員名簿の取込確認 */
+function renderMeiboPreview(box, ws) {
+  const includeOthers = document.getElementById('import-include-others').checked;
+  const res = C.parseMeibo(sheetRows(ws), includeOthers);
+  importState.result = res;
+  importState.kind = 'meibo';
+  if (res.error) { box.innerHTML = `<p class="error-text">${escapeHtml(res.error)}</p>`; return; }
+  const plan = planImport('meibo', res.records, true);
+  const g = (v) => GENDER_LABEL[v || ''] || '';
+  box.innerHTML = `
+    <h3>取込内容の確認（人事システムの職員名簿）</h3>
+    <div class="import-summary">
+      <div><strong>見出し行：</strong>${res.headerRow + 1}行目／<strong>取込対象：</strong>${res.records.length}人（職員台帳に新規 ${plan.add}人・更新 ${plan.update}人）</div>
+      <div><strong>読み込む項目：</strong>番号・氏名・ﾌﾘｶﾞﾅ・性別（1＝男性、0/2＝女性）・生年月日・採用日・退職日・区分名・職種・所属・職名・係・級・号・在職・郵便番号・住所・電話・携帯・Mail・緊急時連絡先</div>
+      <div class="muted">PASS・内線等・財務・労務・経歴などの列は読み込みません。既存の職員とは職員番号 → 氏名と生年月日の順で照合し、名簿の値で上書きします。</div>
+    </div>
+    ${res.excluded.length ? `<details><summary>会計年度任用職員以外のため取り込まない行（${res.excluded.length}件）</summary><ul>${res.excluded.map((x) => `<li>${x.row}行目 ${escapeHtml(x.name)}：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
+    ${res.skipped.length ? `<details><summary>取り込まない行（${res.skipped.length}件）</summary><ul>${res.skipped.map((x) => `<li>${x.row}行目：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
+    ${tableHtml(['行', '番号', '氏名', 'ﾌﾘｶﾞﾅ', '性別', '生年月日', '採用日', '退職日', '所属', '職名', '在職', '職員台帳'],
+      res.records.slice(0, 100).map((r) => {
+        const hit = C.findStaffForMeibo(DATA, r);
+        return `<tr><td>${r._row}</td><td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.kana)}</td><td>${g(r.gender)}</td>
+          <td>${C.toWarekiShort(r.birth)}</td><td>${C.toWarekiShort(r.hireDate)}</td><td>${C.toWarekiShort(r.retireDate)}</td>
+          <td>${escapeHtml(r.dept)}${r.section ? `<br><small>${escapeHtml(r.section)}</small>` : ''}</td><td>${escapeHtml(r.title)}</td><td>${escapeHtml(r.inService)}</td>
+          <td>${hit ? `<span class="badge">更新</span> ${escapeHtml(hit.name)}` : '<span class="badge ok">新規</span>'}</td></tr>`;
+      }),
+      '取り込む職員がいません（会計年度任用職員の行がない場合は「会計年度任用職員以外も取り込む」を確認してください）。')}
+    ${res.records.length > 100 ? `<p class="muted">先頭100件を表示しています（全${res.records.length}件）。</p>` : ''}
+    <div class="row-actions"><button class="btn-primary" id="btn-import-run"${res.records.length ? '' : ' disabled'}>この内容で取り込む</button></div>`;
+  document.getElementById('btn-import-run').onclick = runImport;
+}
+/** 名簿の採用日を含む任用が未登録の職員（新規採用者の任用登録漏れ） */
+function hiresWithoutAppointment(staffIds) {
+  return DATA.staff.filter((s) => (!staffIds || staffIds.includes(s.id)) && s.hireDate && !s.retireDate && !C.hasAppointmentOn(DATA, s.id, s.hireDate));
+}
+function hireAppointmentPreset(s) {
+  return {
+    staffId: s.id, recruitMethod: 'public', yearInService: 1, deptCode: s.rosterDeptCode || '', dept: s.rosterDept || '', workplace: s.rosterDept || '',
+    title: s.rosterTitle || '', start: s.hireDate, end: C.fiscalYearEnd(C.fiscalYearOf(s.hireDate)),
+  };
+}
+function hiresTableHtml(list) {
+  return tableHtml(['氏名', '採用日', '名簿の所属', '名簿の職名', ''],
+    list.map((s) => `<tr><td>${nameLink(s.id)}</td><td>${C.formatDateJa(s.hireDate)}</td><td>${escapeHtml(s.rosterDept || '')}</td><td>${escapeHtml(s.rosterTitle || '')}</td>
+      <td><button class="btn-small" data-hire-appt="${s.id}">任用を登録</button></td></tr>`), '');
+}
+function bindHireButtons(root) {
+  root.querySelectorAll('[data-hire-appt]').forEach((b) => (b.onclick = () => openAppointForm(null, hireAppointmentPreset(staffById(b.dataset.hireAppt)))));
 }
 /** 任用一覧（総務課の様式）の取込確認 */
 function renderIchiranPreview(box, ws) {
@@ -1181,6 +1270,22 @@ function planImport(kind, records, createStaff, apply = false) {
     return s;
   };
   for (const r of records) {
+    if (kind === 'meibo') {
+      let s = C.findStaffForMeibo(target, r);
+      const fields = {
+        number: r.number, name: r.name, kana: r.kana, gender: r.gender, birth: r.birth, hireDate: r.hireDate, retireDate: r.retireDate,
+        category: r.category, jobType: r.jobType, rosterDeptCode: r.deptCode, rosterDept: r.dept, rosterTitle: r.title, rosterSection: r.section,
+        grade: r.grade, step: r.step, inService: r.inService, postal: r.postal, address: r.address, phone: r.phone, mobile: r.mobile, email: r.email,
+        emergencyName: r.emergencyName, emergencyRelation: r.emergencyRelation, emergencyPhone: r.emergencyPhone,
+      };
+      const vals = {};
+      for (const [k, v] of Object.entries(fields)) if (v !== '' && v != null) vals[k] = v;
+      vals.rosterImportedAt = new Date().toISOString();
+      if (s) { Object.assign(s, vals); out.update += 1; }
+      else { s = { id: C.uid('st'), createdAt: new Date().toISOString(), ...vals }; target.staff.push(s); out.add += 1; }
+      (out.touched = out.touched || []).push(s.id);
+      continue;
+    }
     if (kind === 'ninyoIchiran') {
       let s = C.findStaff(target, r.number, r.name);
       if (!s) {
@@ -1237,7 +1342,17 @@ function runImport() {
   const res = planImport(kind, result.records, kind === 'ninyoIchiran' || document.getElementById('import-create-staff').checked, true);
   saveData();
   initFiscalYearPicker();
-  document.getElementById('import-preview').innerHTML = `<p class="success-text">取込が完了しました：新規 ${res.add}件／更新 ${res.update}件／スキップ ${res.skip.length + result.skipped.length}件${res.newStaff ? `／職員を自動追加 ${res.newStaff}人` : ''}</p>`;
+  const box = document.getElementById('import-preview');
+  box.innerHTML = `<p class="success-text">取込が完了しました：新規 ${res.add}件／更新 ${res.update}件／スキップ ${res.skip.length + result.skipped.length}件${res.newStaff ? `／職員を自動追加 ${res.newStaff}人` : ''}</p>`;
+  if (kind === 'meibo') {
+    // 初めて使うときは過去の採用者も含まれるため、対象年度以降の採用日に限る（過去の任用は任用一覧の取込で登録）
+    const hires = hiresWithoutAppointment(res.touched || []).filter((x) => x.hireDate >= C.fiscalYearStart(currentFy()));
+    if (hires.length) {
+      box.innerHTML += `<h3>任用が未登録の職員（名簿の採用日を含む任用がありません）</h3>
+        <p class="hint">新規採用者は「任用を登録」から任用を登録してください。所属・職名・任用期間（採用日〜年度末）は名簿から入力済みで開きます。</p>${hiresTableHtml(hires)}`;
+      bindHireButtons(box);
+    }
+  }
   document.getElementById('import-file').value = '';
   importState = null;
   renderAll();
@@ -1265,6 +1380,13 @@ async function importApplicants(exam, file, input) {
 }
 function downloadImportTemplate() {
   const kind = document.getElementById('import-kind').value;
+  if (kind === 'meibo') {
+    writeWorkbook('取込ひな形_職員名簿.xlsx', [{ name: 'Sheet1', rows: [
+      ['番号', '区分名', '職種', '氏名', 'ﾌﾘｶﾞﾅ', '性別', '生年月日', '採用日', '退職日', '所属CD', '所属名', '職名', '係名', '在職', '郵便番号', '住所', '住所方書', '電話', '携帯', 'Mail', '緊急時氏名', '緊急時続柄', '緊急時電話'],
+      ['10001', '会計年度任用職員', '事務', '高田　花子', 'ﾀｶﾀ ﾊﾅｺ', 0, '1985/05/10', `${C.fiscalYearStart(currentFy()).replace(/-/g, '/')}`, '', '1000', '総務課', '事務補助員', '職員係', 1, '', '', '', '', '', '', '', '', ''],
+    ] }]);
+    return;
+  }
   if (kind === 'ninyoIchiran') {
     const rows = C.ninyoIchiranRows({ ...DATA, appointments: [] }, currentFy(), DATA.settings);
     rows.push(['○', 1, '10001', 'パート(月額)', '高田　花子', 'ﾀｶﾀ　ﾊﾅｺ', '1000', '総務課', '1', '', `${C.toWarekiShort(C.fiscalYearStart(currentFy()))}～${C.toWarekiShort(C.fiscalYearEnd(currentFy()))}`,
@@ -1945,6 +2067,7 @@ function init() {
   document.getElementById('import-kind').onchange = renderImportPreview;
   document.getElementById('import-sheet').onchange = renderImportPreview;
   document.getElementById('import-create-staff').onchange = renderImportPreview;
+  document.getElementById('import-include-others').onchange = renderImportPreview;
   document.getElementById('btn-import-template').onclick = downloadImportTemplate;
 
   document.getElementById('btn-backup').onclick = doBackup;

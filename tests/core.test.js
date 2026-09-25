@@ -475,3 +475,62 @@ test('残る人・残らない人の判定と公募が必要な職', () => {
   const p4 = C.buildNextYearPlan(d, 2026, d.settings).find((p) => p.staffId === 's4');
   assert.ok(p4.reasons.some((r) => /退職登録済み/.test(r)));
 });
+
+/* ---------- 人事システムの職員名簿（架空データ） ---------- */
+const MEIBO_HEADER = ['番号', '区分cd', '区分名', '区分補足', '身分', '職種', '氏名', 'ﾌﾘｶﾞﾅ', '性別', '生年月日', '採用日', '退職日', '所属CD', '所属ST', '所属名', 'ランク', '職名', '兼職', '係CD', '係名', '年度年齢', '在職', '内線等', 'PASS', '財務', '労務', '級', '号', '経歴', '社保', '雇保', 'Mail', '郵便番号', '住所', '住所方書', '電話', '携帯', '緊急時氏名', '緊急時続柄', '緊急時電話', '新規'];
+const meiboRow = (o) => MEIBO_HEADER.map((h) => (h in o ? o[h] : ''));
+const MEIBO_ROWS = [
+  MEIBO_HEADER,
+  meiboRow({ 番号: 90101, 区分名: '会計年度任用職員', 職種: '事務', 氏名: '架空　一子', ﾌﾘｶﾞﾅ: 'ｶｸｳ ｲﾁｺ', 性別: 0, 生年月日: new Date(1985, 4, 10), 採用日: new Date(2026, 3, 1), 所属CD: 1300, 所属名: '市民課', 職名: '事務補助員', 係名: '窓口係', 在職: 1, PASS: 1234, 内線等: 999, Mail: 'x@example.jp', 郵便番号: '000-0000', 住所: '架空町1番地', 住所方書: '101号', 電話: '0000-00-0000' }),
+  meiboRow({ 番号: 90102, 区分名: '会計年度任用職員', 氏名: '架空　二郎', ﾌﾘｶﾞﾅ: 'ｶｸｳ ｼﾞﾛｳ', 性別: 1, 生年月日: '1990/01/20', 採用日: 'R8.10.1', 所属名: '建設課', 職名: '技術員', 在職: 1 }),
+  meiboRow({ 番号: 90001, 区分名: '正職員', 氏名: '架空　正子', 性別: 2, 生年月日: new Date(1980, 0, 1), 採用日: new Date(2005, 3, 1), 在職: 1 }),
+];
+
+test('職員名簿：会計年度任用職員だけを読み、必要な情報を持ってくる（PASS等は読まない）', () => {
+  const res = C.parseMeibo(MEIBO_ROWS, false);
+  assert.ifError(res.error);
+  assert.strictEqual(res.records.length, 2);
+  assert.strictEqual(res.excluded.length, 1);
+  const [a, b] = res.records;
+  assert.strictEqual(a.number, '90101');
+  assert.strictEqual(a.gender, 'F');
+  assert.strictEqual(a.birth, '1985-05-10');
+  assert.strictEqual(a.hireDate, '2026-04-01');
+  assert.strictEqual(a.dept, '市民課');
+  assert.strictEqual(a.title, '事務補助員');
+  assert.strictEqual(a.section, '窓口係');
+  assert.strictEqual(a.address, '架空町1番地　101号');
+  assert.strictEqual(a.email, 'x@example.jp');
+  assert.strictEqual(a.inService, '在職');
+  assert.ok(!('PASS' in a) && !('pass' in a) && !Object.values(a).includes('1234'));
+  assert.strictEqual(b.gender, 'M');
+  assert.strictEqual(b.birth, '1990-01-20');
+  assert.strictEqual(b.hireDate, '2026-10-01');
+  // 区分を問わず取り込む設定
+  assert.strictEqual(C.parseMeibo(MEIBO_ROWS, true).records.length, 3);
+});
+
+test('職員名簿：既存の職員との照合（番号→氏名と生年月日）と任用登録の確認', () => {
+  const d = C.emptyData();
+  d.staff.push({ id: 'a', number: '90101', name: '架空　一子' });
+  d.staff.push({ id: 'b', number: '', name: '架空 二郎' }); // 任用一覧から先に取り込んだ職員（番号なし）
+  const [r1, r2] = C.parseMeibo(MEIBO_ROWS, false).records;
+  assert.strictEqual(C.findStaffForMeibo(d, r1).id, 'a');
+  assert.strictEqual(C.findStaffForMeibo(d, r2).id, 'b');
+  d.appointments.push({ id: 'x', staffId: 'a', start: '2026-04-01', end: '2027-03-31' });
+  assert.strictEqual(C.hasAppointmentOn(d, 'a', '2026-04-01'), true);
+  assert.strictEqual(C.hasAppointmentOn(d, 'b', '2026-10-01'), false);
+});
+
+test('和暦表記（令和・平成・昭和）と読み戻し', () => {
+  assert.strictEqual(C.formatDateJa('2019-05-01'), '令和元年5月1日');
+  assert.strictEqual(C.formatDateJa('2019-04-30'), '平成31年4月30日');
+  assert.strictEqual(C.formatDateJa('1990-06-01'), '平成2年6月1日');
+  assert.strictEqual(C.formatDateJa('1989-01-07'), '昭和64年1月7日');
+  assert.strictEqual(C.toWarekiShort('2026-04-01'), 'R8.4.1');
+  assert.strictEqual(C.toWarekiShort('2019-04-01'), 'H31.4.1');
+  assert.strictEqual(C.toWarekiShort('1985-05-10'), 'S60.5.10');
+  for (const iso of ['2026-04-01', '2019-04-01', '1990-06-01', '1985-05-10']) {
+    assert.strictEqual(C.excelValueToISO(C.toWarekiShort(iso)), iso);
+  }
+});

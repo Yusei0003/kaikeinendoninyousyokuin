@@ -115,13 +115,22 @@
     return `${y}`;
   }
   function fyLabel(fy) { return `${warekiYear(fy)}年度`; }
+  /** 元号（令和：2019/5/1〜、平成：1989/1/8〜、昭和：1926/12/25〜） */
+  function eraOf(d) {
+    const iso = toISO(d);
+    const y = d.getFullYear();
+    if (iso >= '2019-05-01') return { name: '令和', code: 'R', year: y - 2018 };
+    if (iso >= '1989-01-08') return { name: '平成', code: 'H', year: y - 1988 };
+    if (iso >= '1926-12-25') return { name: '昭和', code: 'S', year: y - 1925 };
+    return null;
+  }
   function formatDateJa(s) {
     const d = parseISO(s);
     if (!d) return '';
-    const y = d.getFullYear();
-    // 令和元年5月1日より前は平成表記
-    if (y < 2019 || (y === 2019 && d.getMonth() < 4)) return `${y}年${d.getMonth() + 1}月${d.getDate()}日`;
-    return `${warekiYear(y)}年${d.getMonth() + 1}月${d.getDate()}日`;
+    const e = eraOf(d);
+    const md = `${d.getMonth() + 1}月${d.getDate()}日`;
+    if (!e) return `${d.getFullYear()}年${md}`;
+    return `${e.name}${e.year === 1 ? '元' : e.year}年${md}`;
   }
 
   function uid(prefix) {
@@ -1071,8 +1080,9 @@
   function toWarekiShort(iso) {
     const d = parseISO(iso);
     if (!d) return '';
-    const y = d.getFullYear();
-    return y >= 2019 ? `R${y - 2018}.${d.getMonth() + 1}.${d.getDate()}` : `${y}.${d.getMonth() + 1}.${d.getDate()}`;
+    const e = eraOf(d);
+    const md = `${d.getMonth() + 1}.${d.getDate()}`;
+    return e ? `${e.code}${e.year}.${md}` : `${d.getFullYear()}.${md}`;
   }
   /** 'R8.4.1～R9.3.31' → ['2026-04-01','2027-03-31'] */
   function parsePeriod(v) {
@@ -1270,6 +1280,132 @@
     return rows;
   }
 
+  /* ------------------------------------------------------------
+   * 人事システムの職員名簿（番号・区分名・氏名・ﾌﾘｶﾞﾅ・性別・生年月日・採用日…）
+   * 採用があったとき・初めて使うときに取り込み、職員台帳の基本情報を埋める。
+   * PASS・内線等・財務・労務などの業務に不要な列は読み込まない。
+   * ------------------------------------------------------------ */
+  const MEIBO_COLUMNS = [
+    ['number', (h) => h === '番号' || h === '職員番号'],
+    ['category', (h) => h === '区分名'],
+    ['status', (h) => h === '身分'],
+    ['jobType', (h) => h === '職種'],
+    ['name', (h) => h === '氏名'],
+    ['kana', (h) => h === 'フリガナ' || h === 'ふりがな'],
+    ['gender', (h) => h === '性別'],
+    ['birth', (h) => h === '生年月日'],
+    ['hireDate', (h) => h === '採用日' || h === '採用年月日'],
+    ['retireDate', (h) => h === '退職日'],
+    ['deptCode', (h) => h === '所属CD'],
+    ['dept', (h) => h === '所属名'],
+    ['title', (h) => h === '職名'],
+    ['section', (h) => h === '係名'],
+    ['sideJob', (h) => h === '兼職'],
+    ['grade', (h) => h === '級'],
+    ['step', (h) => h === '号'],
+    ['inService', (h) => h === '在職'],
+    ['postal', (h) => h === '郵便番号'],
+    ['address1', (h) => h === '住所'],
+    ['address2', (h) => h === '住所方書'],
+    ['phone', (h) => h === '電話'],
+    ['mobile', (h) => h === '携帯'],
+    ['email', (h) => h === 'MAIL' || h === 'メール'],
+    ['emergencyName', (h) => h === '緊急時氏名'],
+    ['emergencyRelation', (h) => h === '緊急時続柄'],
+    ['emergencyPhone', (h) => h === '緊急時電話'],
+  ];
+  function meiboHeaderKey(h) { return String(h == null ? '' : h).normalize('NFKC').replace(/\s/g, '').toUpperCase(); }
+  /** 名簿の性別：1＝男性、0または2＝女性（人事システムの出力） */
+  function parseMeiboGender(v) {
+    const s = String(v == null ? '' : v).normalize('NFKC').trim();
+    if (s === '1' || /男/.test(s)) return 'M';
+    if (s === '0' || s === '2' || /女/.test(s)) return 'F';
+    return '';
+  }
+  /**
+   * 名簿の行データを取込用レコードに変換する。
+   * includeOthers=false のときは区分名に「会計年度」を含む行だけを対象にする。
+   */
+  function parseMeibo(rows, includeOthers) {
+    let headerRow = -1;
+    const map = {};
+    for (let r = 0; r < Math.min(rows.length, 10); r++) {
+      const hs = (rows[r] || []).map(meiboHeaderKey);
+      if (!hs.includes('氏名') || !(hs.includes('採用日') || hs.includes('生年月日'))) continue;
+      headerRow = r;
+      hs.forEach((h, i) => {
+        const hit = MEIBO_COLUMNS.find(([f, test]) => map[f] === undefined && test(h));
+        if (hit) map[hit[0]] = i;
+      });
+      break;
+    }
+    if (headerRow < 0) return { records: [], skipped: [], excluded: [], error: '「氏名」と「採用日」（または「生年月日」）の見出しがある行が見つかりません。職員名簿の形式か確認してください。' };
+    const get = (row, f) => (map[f] === undefined ? '' : row[map[f]]);
+    const records = [];
+    const skipped = [];
+    const excluded = [];
+    for (let r = headerRow + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const name = cellText(get(row, 'name'));
+      if (!name) { if (row.some((c) => c != null && c !== '')) skipped.push({ row: r + 1, reason: '氏名が空欄' }); continue; }
+      const category = cellText(get(row, 'category'));
+      if (!includeOthers && map.category !== undefined && !/会計年度/.test(category)) {
+        excluded.push({ row: r + 1, name, reason: `区分名が「${category || '空欄'}」` });
+        continue;
+      }
+      const addr = [cellText(get(row, 'address1')), cellText(get(row, 'address2'))].filter(Boolean).join('　');
+      const inService = cellText(get(row, 'inService'));
+      records.push({
+        _row: r + 1,
+        number: cellText(get(row, 'number')),
+        name,
+        kana: cellText(get(row, 'kana')),
+        gender: parseMeiboGender(get(row, 'gender')),
+        birth: excelValueToISO(get(row, 'birth')),
+        hireDate: excelValueToISO(get(row, 'hireDate')),
+        retireDate: excelValueToISO(get(row, 'retireDate')),
+        category,
+        jobType: cellText(get(row, 'jobType')),
+        deptCode: cellText(get(row, 'deptCode')),
+        dept: cellText(get(row, 'dept')),
+        title: cellText(get(row, 'title')),
+        section: cellText(get(row, 'section')),
+        grade: cellText(get(row, 'grade')),
+        step: cellText(get(row, 'step')),
+        inService: inService === '' ? '' : inService === '1' ? '在職' : '非在職',
+        postal: cellText(get(row, 'postal')),
+        address: addr,
+        phone: cellText(get(row, 'phone')),
+        mobile: cellText(get(row, 'mobile')),
+        email: cellText(get(row, 'email')),
+        emergencyName: cellText(get(row, 'emergencyName')),
+        emergencyRelation: cellText(get(row, 'emergencyRelation')),
+        emergencyPhone: cellText(get(row, 'emergencyPhone')),
+      });
+    }
+    return { records, skipped, excluded, headerRow, map };
+  }
+  /** 名簿で職員を探す：職員番号 → 氏名と生年月日 → 氏名（1人に決まる場合） */
+  function findStaffForMeibo(data, rec) {
+    if (rec.number) {
+      const byNo = data.staff.find((s) => s.number && String(s.number) === String(rec.number));
+      if (byNo) return byNo;
+    }
+    const key = String(rec.name || '').replace(/[\s　]/g, '');
+    const same = data.staff.filter((s) => String(s.name).replace(/[\s　]/g, '') === key);
+    if (rec.birth) {
+      const hit = same.find((s) => s.birth === rec.birth);
+      if (hit) return hit;
+      const noBirth = same.filter((s) => !s.birth && (!s.number || !rec.number));
+      return noBirth.length === 1 ? noBirth[0] : null;
+    }
+    return same.length === 1 ? same[0] : null;
+  }
+  /** 名簿の採用日を含む任用が登録されているか（新規採用者の任用登録漏れの確認） */
+  function hasAppointmentOn(data, staffId, iso) {
+    return data.appointments.some((a) => a.staffId === staffId && a.status !== 'canceled' && a.start <= iso && iso <= (a.originalEnd || a.end));
+  }
+
   /** 職員番号優先、なければ氏名（空白除去）で職員を探す */
   function findStaff(data, number, name) {
     if (number) {
@@ -1292,6 +1428,7 @@
     kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
     fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
+    parseMeibo, parseMeiboGender, findStaffForMeibo, hasAppointmentOn,
     appointmentStatus, expiringAppointments,
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,

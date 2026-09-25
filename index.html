@@ -232,12 +232,14 @@
   <section id="panel-import" class="tab-panel">
     <div class="card">
       <h2>Excelから取り込む</h2>
-      <p class="hint"><strong>過去の「任用一覧」は、年度ごとのファイルをそのまま「任用一覧（総務課の様式）」で取り込めます。</strong>年度は見出しの「R8.4.1 社会保険」から判定し、任用期間が空欄の行はその年度の1年間として登録します（確認が必要な行として表示）。古い年度から順に取り込むと、年目・再度の任用の回数・フルタイムの継続期間が正しく計算されます。<br>
+      <p class="hint"><strong>採用があったとき・初めて使うときは、人事システムの「職員名簿」をそのまま取り込みます。</strong>番号・氏名・ﾌﾘｶﾞﾅ・性別・生年月日・採用日・退職日・所属・職名・住所・連絡先などを職員台帳に入れ、既存の職員は職員番号（なければ氏名と生年月日）で照合して上書きします。区分名が「会計年度任用職員」の行だけを取り込み、PASS・内線などの列は読み込みません。名簿の採用日を含む任用がない職員は、取込後に「任用を登録」から登録できます。ファイルを選ぶと、名簿か任用一覧かを見出しから自動で判別します。<br>
+        <strong>過去の「任用一覧」は、年度ごとのファイルをそのまま「任用一覧（総務課の様式）」で取り込めます。</strong>年度は見出しの「R8.4.1 社会保険」から判定し、任用期間が空欄の行はその年度の1年間として登録します（確認が必要な行として表示）。古い年度から順に取り込むと、年目・再度の任用の回数・フルタイムの継続期間が正しく計算されます。<br>
         そのほかの既存のExcel台帳（.xlsx／.xls／.csv）も読み込めます。1行目以外に見出しがあっても、先頭10行から見出し行を自動で探し、「氏名」「所属課」「任期（自）」などの列名の揺れも吸収します。取込前に内容を確認できます。</p>
       <form id="import-form" class="grid-form">
         <label>取り込む内容
           <select id="import-kind">
             <option value="ninyoIchiran">任用一覧（総務課の様式）</option>
+            <option value="meibo">職員名簿（人事システムの出力）</option>
             <option value="staff">職員台帳</option>
             <option value="appointments">任用（任期・所属・報酬など）</option>
             <option value="evaluations">人事評価</option>
@@ -245,6 +247,7 @@
         </label>
         <label>ファイル<input type="file" id="import-file" accept=".xlsx,.xls,.csv"></label>
         <label>シート<select id="import-sheet"></select></label>
+        <label class="checkbox-label"><input type="checkbox" id="import-include-others"> 職員名簿で、会計年度任用職員以外（正職員など）も取り込む</label>
         <label class="checkbox-label"><input type="checkbox" id="import-create-staff" checked> 台帳にない職員は自動で追加する（任用・評価の取込時。任用一覧は常に追加）</label>
       </form>
       <div class="row-actions">
@@ -292,7 +295,8 @@
     <div class="card">
       <h2>使い方</h2>
       <ol class="help-list">
-        <li><strong>はじめに</strong>：「Excel取込」→「任用一覧（総務課の様式）」で、過去の任用一覧を古い年度から順に読み込みます。画面上部の年度ボタンで対象年度を切り替えます。</li>
+        <li><strong>はじめに</strong>：「Excel取込」で、①過去の任用一覧を古い年度から順に、②人事システムの職員名簿（性別・生年月日・採用日など）を読み込みます。画面上部の年度ボタンで対象年度を切り替えます。</li>
+        <li><strong>採用があったとき</strong>：人事システムの職員名簿を「Excel取込」で読み込むと、新規採用者が職員台帳に入り、「任用を登録」から名簿の所属・職名・採用日で任用を登録できます。</li>
         <li><strong>職員台帳</strong>：職員の一覧です。氏名を押すと経歴（働き始め、勤続、年度ごとの所属・職名と変更点、人事評価、応募歴）を確認できます。</li>
         <li><strong>任用一覧</strong>（起動時の画面）：総務課の任用一覧と同じ項目で年度ごとの任用を管理します。入力画面の下に市マニュアルによる判定が出るので、「判定結果を入力欄に反映」で入力できます。年度途中の延長は「任期更新」を使います。</li>
         <li><strong>年目・任用意向</strong>：職員ごとに3年周期の何年目か・公募年度・勤続を確認し、再度の任用の可否と本人の希望をその場で選んで入力します（1月の再度の任用に関する通知の準備）。</li>
