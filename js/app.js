@@ -493,8 +493,8 @@ function openStaffDetail(staffId) {
   }).join('');
   const body = `
     <div class="sum-grid">
-      ${card('働き始め（最初の採用）', wareki(sm.firstStart), [sm.firstStartSource === 'roster' ? '職員名簿の採用日' : 'このアプリの最初の任用', sm.fiscalYears ? `任用のある年度：${sm.fiscalYears}年度分` : ''].filter(Boolean).join('<br>'))}
-      ${card('勤続（切れ目なく継続）', sm.serviceStart ? `${wareki(sm.serviceStart)}から` : '—', sm.serviceYears == null ? '' : `継続勤務年数 ${sm.serviceYears === 0 ? '初年' : `${sm.serviceYears}年`}${sm.serviceSource === 'roster' ? '（名簿の採用日から通算）' : sm.serviceEstimated ? '（年目から推定）' : sm.serviceSource === 'manual' ? '（勤続開始日の入力値）' : ''}`)}
+      ${card('働き始め（最初の採用）', wareki(sm.firstStart), [{ roster: '職員名簿の採用日', jinji: '人事システムの任用の最初の開始日', history: '任用一覧の最初の任用' }[sm.firstStartSource] || '', sm.fiscalYears ? `任用のある年度：${sm.fiscalYears}年度分` : ''].filter(Boolean).join('<br>'))}
+      ${card('勤続（切れ目なく継続）', sm.serviceStart ? `${wareki(sm.serviceStart)}から` : '—', sm.serviceYears == null ? '' : `継続勤務年数 ${sm.serviceYears === 0 ? '初年' : `${sm.serviceYears}年`}${sm.serviceSource === 'jinji' ? '（人事システムの任用から）' : sm.serviceSource === 'roster' ? '（名簿の採用日から通算）' : sm.serviceEstimated ? '（年目から推定）' : sm.serviceSource === 'manual' ? '（勤続開始日の入力値）' : ''}`)}
       ${card(sm.current ? '現在の所属・職名' : '直近の所属・職名', cur ? `${escapeHtml(cur.dept || '—')}` : '—', cur ? `${escapeHtml(cur.title || '')}・${C.KUBUN_LABEL[C.kubunOf(cur)]}` : '')}
       ${card('3年周期', sm.cycleYear ? `${sm.cycleYear}年目` : '—', sm.publicFy ? `${C.toWarekiShort(C.fiscalYearStart(sm.publicFy)).replace(/\.1$/, '')} に公募` : '')}
       ${card('変更の回数', `所属 ${sm.deptChanges}回・職名 ${sm.titleChanges}回`, '')}
@@ -514,6 +514,11 @@ function openStaffDetail(staffId) {
       <dt>緊急時連絡先</dt><dd>${escapeHtml([s.emergencyName, s.emergencyRelation ? `（${s.emergencyRelation}）` : '', s.emergencyPhone].filter(Boolean).join(' ')) || '—'}</dd>
     </dl>
     ${s.rosterImportedAt ? `<p class="muted">人事システムの名簿から取込：${new Date(s.rosterImportedAt).toLocaleDateString('ja-JP')}</p>` : ''}
+    ${(s.employment || []).length ? `<h4>人事システムの任用（在職期間）</h4>
+      ${tableHtml(['区分', '開始日', '終了日', '退職事由', '前の期間とのつながり'], C.employmentTimeline(s).map((x) => `<tr class="${x.continuous === false ? 'row-warning' : ''}">
+        <td>${escapeHtml(x.kubunText)}</td><td>${wareki(x.start)}</td><td>${x.end ? wareki(x.end) : '<span class="badge ok">継続中</span>'}</td><td>${escapeHtml(x.reason || '')}</td>
+        <td>${x.continuous == null ? '—' : x.continuous ? '<span class="badge ok">切れ目なし</span>' : `<span class="badge warn">${x.gapDays}日空き（途切れ）</span>`}</td></tr>`))}
+      <p class="muted">人事システムの任用から取込：${new Date(s.employmentImportedAt).toLocaleDateString('ja-JP')}</p>` : ''}
     <h4>経歴（新しい順）</h4>
     ${career.rows.length ? `<ol class="timeline">${timeline}</ol>` : '<p class="empty">任用の記録はありません。</p>'}
     <h4>人事評価</h4>
@@ -659,7 +664,7 @@ function judgeHtml(j) {
       <dt>雇保→退手 切替</dt><dd><strong>${j.sw.taishu}</strong> <small class="muted">6月経過</small></dd>
       <dt>健保→共済 切替</dt><dd><strong>${j.sw.kyosai}</strong> <small class="muted">12月経過</small></dd>` : ''}
     <dt>健康診断・ストレスチェック</dt><dd>${j.health ? '<strong>対象</strong>' : '対象外'} <small class="muted">第Ⅶ章4（任用1年かつ週29時間以上）</small></dd>
-    <dt>勤続（継続勤務）</dt><dd>${j.service ? `${j.service.date}から${j.service.manual ? '（入力値）' : j.service.source === 'roster' ? '（職員名簿の採用日から）' : j.service.estimated ? '（年目から推定）' : ''}・継続勤務年数 ${j.serviceYears === 0 ? '任用の日' : `${j.serviceYears}年`}` : '—'} <small class="muted">公募をまたいでも切れ目がなければ通算（年休・退手・共済に使用）</small></dd>
+    <dt>勤続（継続勤務）</dt><dd>${j.service ? `${j.service.date}から${j.service.manual ? '（入力値）' : j.service.source === 'jinji' ? '（人事システムの任用から）' : j.service.source === 'roster' ? '（職員名簿の採用日から）' : j.service.estimated ? '（年目から推定）' : ''}・継続勤務年数 ${j.serviceYears === 0 ? '任用の日' : `${j.serviceYears}年`}` : '—'} <small class="muted">公募をまたいでも切れ目がなければ通算（年休・退手・共済に使用）</small></dd>
     <dt>3年周期の年目（公募の判断）</dt><dd>${j.year ? `${j.year}年目` : '—'}${j.publicFy ? `・<strong>${C.toWarekiShort(C.fiscalYearStart(j.publicFy)).replace(/\.1$/, '')}に公募</strong>` : ''} <small class="muted">第Ⅷ章2（公募で1年目に戻る）</small></dd>
   </dl>
   <button type="button" class="btn-secondary" id="judge-apply">判定結果を入力欄に反映</button>
@@ -779,7 +784,7 @@ function serviceCell(a) {
   const ss = C.serviceStartOf(DATA, a, false);
   if (!ss) return '<span class="muted">-</span>';
   const y = C.continuousServiceYears(DATA, a);
-  const mark = ss.source === 'roster' ? '<small class="muted" title="職員名簿の採用日から通算">名</small>' : ss.estimated ? '<small class="muted" title="3年周期の年目から推定">推</small>' : '';
+  const mark = ss.source === 'jinji' ? '<small class="muted" title="人事システムの任用（在職期間）から">人</small>' : ss.source === 'roster' ? '<small class="muted" title="職員名簿の採用日から通算">名</small>' : ss.estimated ? '<small class="muted" title="3年周期の年目から推定">推</small>' : '';
   return `<span title="${ss.date}から${ss.source === 'roster' ? '（名簿の採用日から）' : ss.estimated ? '（推定）' : ''}">${y === 0 ? '初年' : `${y}年`}${mark}</span>`;
 }
 function renderAppointments() {
@@ -1138,6 +1143,8 @@ async function onImportFile() {
     const head = (sheetRows(wb.Sheets[sel.value]).slice(0, 10) || []).map((r) => (r || []).map((c) => String(c == null ? '' : c).normalize('NFKC').replace(/\s/g, '')));
     const has = (h) => head.some((r) => r.includes(h));
     if (has('氏名') && has('区分名') && has('採用日')) document.getElementById('import-kind').value = 'meibo';
+    else if (has('氏名') && has('開始日') && has('終了日')) document.getElementById('import-kind').value = 'jinjiNinyo';
+    else if (has('氏名') && head.some((r) => r.some((c) => c.includes('任用年数')))) document.getElementById('import-kind').value = 'nensu';
     else if (has('氏名') && has('任用期間')) document.getElementById('import-kind').value = 'ninyoIchiran';
     renderImportPreview();
   } catch (e) {
@@ -1151,6 +1158,8 @@ function renderImportPreview() {
   const ws = importState.wb.Sheets[document.getElementById('import-sheet').value];
   if (kind === 'ninyoIchiran') { renderIchiranPreview(box, ws); return; }
   if (kind === 'meibo') { renderMeiboPreview(box, ws); return; }
+  if (kind === 'jinjiNinyo') { renderJinjiPreview(box, ws); return; }
+  if (kind === 'nensu') { renderNensuPreview(box, ws); return; }
   const res = C.rowsToRecords(sheetRows(ws), kind, DATA.settings);
   importState.result = res;
   importState.kind = kind;
@@ -1203,6 +1212,75 @@ function renderMeiboPreview(box, ws) {
       '取り込む職員がいません（C列の区分名が「会計年度任用職員」の行がありません）。')}
     ${res.records.length > 100 ? `<p class="muted">先頭100件を表示しています（全${res.records.length}件）。</p>` : ''}
     <div class="row-actions"><button class="btn-primary" id="btn-import-run"${res.records.length ? '' : ' disabled'}>この内容で取り込む</button></div>`;
+  document.getElementById('btn-import-run').onclick = runImport;
+}
+/** 人事システムの任用（在職期間）の取込確認 */
+function groupByPerson(records) {
+  const map = new Map();
+  for (const r of records) {
+    const k = r.number ? `no:${r.number}` : `nm:${String(r.name).replace(/[\s　]/g, '')}`;
+    if (!map.has(k)) map.set(k, { number: r.number, name: r.name, rows: [] });
+    map.get(k).rows.push(r);
+  }
+  return [...map.values()];
+}
+function periodText(x, withKubun) {
+  return `${withKubun ? `${escapeHtml(x.kubunText)}：` : ''}${C.toWarekiShort(x.start)}～${x.end ? C.toWarekiShort(x.end) : '（継続中）'}${x.reason ? `（${escapeHtml(x.reason)}）` : ''}${x.continuous === false ? ` <span class="badge warn">${x.gapDays}日空き</span>` : ''}`;
+}
+function renderJinjiPreview(box, ws) {
+  const res = C.parseJinjiNinyo(sheetRows(ws));
+  importState.result = res;
+  importState.kind = 'jinjiNinyo';
+  if (res.error) { box.innerHTML = `<p class="error-text">${escapeHtml(res.error)}</p>`; return; }
+  const people = groupByPerson(res.records);
+  box.innerHTML = `
+    <h3>取込内容の確認（人事システムの任用）</h3>
+    <div class="import-summary">
+      <div><strong>見出し行：</strong>${res.headerRow + 1}行目／<strong>在職期間：</strong>${res.records.length}件（${people.length}人）</div>
+      <div class="muted">職員ごとに、人事システムの在職期間（区分・開始日・終了日・退職事由）で置き換えます。任用一覧の任用は変更しません。勤続（年休の継続勤務年数）と、フルタイムの継続（退手・共済の切替）の判定に使い、任期が継続しているか（途切れ）を確認できます。見出しのない列（「変・複」など）は読み込みません。</div>
+    </div>
+    ${res.skipped.length ? `<details><summary>取り込まない行（${res.skipped.length}件）</summary><ul>${res.skipped.map((x) => `<li>${x.row}行目：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
+    ${tableHtml(['職員番号', '氏名', '在職期間（古い順）', '継続', '職員台帳'], people.slice(0, 200).map((pp) => {
+      const tl = C.employmentTimeline({ employment: pp.rows });
+      const gaps = tl.filter((x) => x.continuous === false);
+      const open = pp.rows.some((x) => !x.end);
+      const hit = C.findStaffForMeibo(DATA, pp);
+      return `<tr class="${gaps.length ? 'row-warning' : ''}"><td>${escapeHtml(pp.number)}</td><td>${escapeHtml(pp.name)}</td>
+        <td>${tl.map((x) => periodText(x, true)).join('<br>')}</td>
+        <td>${gaps.length ? '<span class="badge warn">途切れあり</span>' : '<span class="badge ok">途切れなし</span>'}${open ? '<br><small>在職中</small>' : '<br><small class="muted">退職済み</small>'}</td>
+        <td>${hit ? `<span class="badge">更新</span> ${escapeHtml(hit.name)}` : '<span class="badge ok">新規</span>'}</td></tr>`;
+    }), '取り込む在職期間がありません。')}
+    <div class="row-actions"><button class="btn-primary" id="btn-import-run"${res.records.length ? '' : ' disabled'}>この内容で取り込む</button></div>`;
+  document.getElementById('btn-import-run').onclick = runImport;
+}
+/** 年数確認データの取込確認 */
+function renderNensuPreview(box, ws) {
+  const res = C.parseNensu(sheetRows(ws));
+  importState.result = res;
+  importState.kind = 'nensu';
+  if (res.error) { box.innerHTML = `<p class="error-text">${escapeHtml(res.error)}</p>`; return; }
+  const fy = currentFy();
+  const limit = Number(DATA.settings.reappointLimit);
+  box.innerHTML = `
+    <h3>取込内容の確認（年数確認データ）</h3>
+    <div class="import-summary">
+      <div><strong>見出し行：</strong>${res.headerRow + 1}行目／<strong>対象：</strong>${res.records.length}人</div>
+      <div><strong>「会計年度任用年数」を <span class="badge warn">${C.fyLabel(fy)}</span> の3年周期の年目として取り込みます。</strong>別の年度のデータの場合は、画面上部の年度ボタンで年度を切り替えてから取り込んでください。</div>
+      <div class="muted">${C.fyLabel(fy)}の任用がある職員は、その任用の「会計年度（3年周期の何年目）」にも入れます。${limit + 1}年目の職員は翌年度が公募の対象になります（市マニュアル第Ⅷ章2）。</div>
+    </div>
+    ${res.skipped.length ? `<details><summary>取り込まない行（${res.skipped.length}件）</summary><ul>${res.skipped.map((x) => `<li>${x.row}行目：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
+    ${tableHtml(['番号', '氏名', '身分', '所属名', '職名', `${fyShort(fy)}年度の年目`, '公募年度', '現在の登録', '職員台帳'], res.records.slice(0, 300).map((r) => {
+      const hit = C.findStaffForMeibo(DATA, r);
+      const appt = hit ? C.latestAppointmentsOfFy(DATA, fy).find((a) => a.staffId === hit.id) : null;
+      const cur = appt ? C.yearInServiceOf(DATA, appt) : null;
+      const pfy = fy + limit + 2 - r.years;
+      return `<tr class="${pfy === fy + 1 ? 'row-info' : ''}"><td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.kubunText)}</td>
+        <td>${escapeHtml(r.dept)}</td><td>${escapeHtml(r.title)}</td><td><strong>${r.years}年目</strong></td>
+        <td>${pfy === fy + 1 ? `<span class="badge warn">${fyShort(pfy)}.4 公募</span>` : `${fyShort(pfy)}.4`}</td>
+        <td>${cur == null ? '<span class="muted">任用なし</span>' : cur === r.years ? `${cur}年目` : `<span class="badge warn">${cur}年目 → ${r.years}年目</span>`}</td>
+        <td>${hit ? `<span class="badge">更新</span> ${escapeHtml(hit.name)}` : '<span class="badge ok">新規</span>'}</td></tr>`;
+    }), '取り込む職員がいません。')}
+    <div class="row-actions"><button class="btn-primary" id="btn-import-run"${res.records.length ? '' : ' disabled'}>${C.fyLabel(fy)}の年目として取り込む</button></div>`;
   document.getElementById('btn-import-run').onclick = runImport;
 }
 /** 名簿の採用日を含む任用が未登録の職員（新規採用者の任用登録漏れ） */
@@ -1268,6 +1346,47 @@ function planImport(kind, records, createStaff, apply = false) {
     }
     return s;
   };
+  if (kind === 'jinjiNinyo') {
+    for (const pp of groupByPerson(records)) {
+      let s = C.findStaffForMeibo(target, pp);
+      if (!s) {
+        s = { id: C.uid('st'), number: pp.number || '', name: pp.name, category: '会計年度任用職員', createdAt: new Date().toISOString() };
+        target.staff.push(s);
+        out.add += 1;
+      } else {
+        if (pp.number && !s.number) s.number = pp.number;
+        out.update += 1;
+      }
+      s.employment = pp.rows.map((r) => ({ kubun: r.kubun, kubunText: r.kubunText, start: r.start, end: r.end, reason: r.reason, note: r.note }))
+        .sort((a, b) => a.start.localeCompare(b.start));
+      s.employmentImportedAt = new Date().toISOString();
+      (out.touched = out.touched || []).push(s.id);
+    }
+    return out;
+  }
+  if (kind === 'nensu') {
+    const fy = currentFy();
+    out.changedYears = 0;
+    for (const r of records) {
+      let s = C.findStaffForMeibo(target, r);
+      if (!s) {
+        s = { id: C.uid('st'), number: r.number || '', name: r.name, category: '会計年度任用職員', rosterDept: r.dept, rosterTitle: r.title, createdAt: new Date().toISOString() };
+        target.staff.push(s);
+        out.add += 1;
+      } else {
+        if (r.number && !s.number) s.number = r.number;
+        out.update += 1;
+      }
+      s.cycleYears = { ...(s.cycleYears || {}), [fy]: r.years };
+      for (const a of target.appointments) {
+        if (a.staffId !== s.id || a.status === 'canceled' || !a.start || C.fiscalYearOf(a.start) !== fy) continue;
+        if (Number(a.yearInService) !== r.years) { a.yearInService = r.years; out.changedYears += 1; }
+        if (r.years >= 2) a.recruitMethod = 'reappoint';
+      }
+      (out.touched = out.touched || []).push(s.id);
+    }
+    return out;
+  }
   for (const r of records) {
     if (kind === 'meibo') {
       let s = C.findStaffForMeibo(target, r);
@@ -1343,6 +1462,21 @@ function runImport() {
   initFiscalYearPicker();
   const box = document.getElementById('import-preview');
   box.innerHTML = `<p class="success-text">取込が完了しました：新規 ${res.add}件／更新 ${res.update}件／スキップ ${res.skip.length + result.skipped.length}件${res.newStaff ? `／職員を自動追加 ${res.newStaff}人` : ''}</p>`;
+  if (kind === 'jinjiNinyo') {
+    const fy = currentFy();
+    const touched = (res.touched || []).map(staffById).filter(Boolean);
+    const gaps = touched.filter((st) => C.employmentTimeline(st).some((x) => x.continuous === false));
+    const noAppt = touched.filter((st) => (st.employment || []).some((p) => p.start <= C.fiscalYearEnd(fy) && (!p.end || p.end >= C.fiscalYearStart(fy)))
+      && !C.latestAppointmentsOfFy(DATA, fy).some((a) => a.staffId === st.id));
+    box.innerHTML += `<h3>任期の継続の確認</h3>
+      <p class="hint">途切れ（在職期間の間に空き）がある職員は、途切れた後から勤続を数えます。</p>
+      ${tableHtml(['氏名', '在職期間'], gaps.map((st) => `<tr><td>${nameLink(st.id)}</td><td>${C.employmentTimeline(st).map((x) => periodText(x, true)).join('<br>')}</td></tr>`), '途切れがある職員はいません。')}
+      <h3>${C.fyLabel(fy)}に人事システムでは在職しているが、任用一覧に任用がない職員</h3>
+      ${tableHtml(['氏名', '在職期間'], noAppt.map((st) => `<tr><td>${nameLink(st.id)}</td><td>${C.employmentTimeline(st).map((x) => periodText(x, true)).join('<br>')}</td></tr>`), '該当する職員はいません。')}`;
+  }
+  if (kind === 'nensu') {
+    box.innerHTML += `<p class="muted">${C.fyLabel(currentFy())}の任用の年目を${res.changedYears || 0}件更新しました。「年目・任用意向」タブで確認できます。</p>`;
+  }
   if (kind === 'meibo') {
     // 初めて使うときは過去の採用者も含まれるため、対象年度以降の採用日に限る（過去の任用は任用一覧の取込で登録）
     const hires = hiresWithoutAppointment(res.touched || []).filter((x) => x.hireDate >= C.fiscalYearStart(currentFy()));
@@ -1379,6 +1513,16 @@ async function importApplicants(exam, file, input) {
 }
 function downloadImportTemplate() {
   const kind = document.getElementById('import-kind').value;
+  if (kind === 'jinjiNinyo') {
+    writeWorkbook('取込ひな形_任用（人事システム）.xlsx', [{ name: 'Sheet1', rows: [['職員番号', '氏名', '区分', '開始日', '終了日', '退職事由', '備考'],
+      ['10001', '高田　花子', 'パート(月額)', '2024/04/01', '', '未入力', '']] }]);
+    return;
+  }
+  if (kind === 'nensu') {
+    writeWorkbook('取込ひな形_年数確認データ.xlsx', [{ name: 'Sheet1', rows: [['番号', '会計年度任用年数', '身分', '氏名', '所属名', '職名'],
+      ['10001', 1, 'パート(月額)', '高田　花子', '総務部総務課', '事務補助員']] }]);
+    return;
+  }
   if (kind === 'meibo') {
     writeWorkbook('取込ひな形_職員名簿.xlsx', [{ name: 'Sheet1', rows: [
       ['番号', '区分名', '職種', '氏名', 'ﾌﾘｶﾞﾅ', '性別', '生年月日', '採用日', '退職日', '所属CD', '所属名', '職名', '係名', '在職', '郵便番号', '住所', '住所方書', '電話', '携帯', 'Mail', '緊急時氏名', '緊急時続柄', '緊急時電話'],

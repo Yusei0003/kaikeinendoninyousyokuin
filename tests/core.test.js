@@ -589,3 +589,83 @@ test('採用日より後の履歴に途切れがあれば、採用日ではな�
   d2.appointments.push(a);
   assert.strictEqual(C.serviceStartOf(d2, a, false).date, '2026-04-01');
 });
+
+/* ---------- 人事システムの任用（在職期間）・年数確認データ（架空データ） ---------- */
+const JINJI_ROWS = [
+  ['職員番号', '氏名', '区分', '開始日', '終了日', '退職事由', '備考', ''],
+  [90201, '架空　継子', 'フル', new Date(2022, 8, 12), new Date(2024, 2, 31), '任期満了', '', '変・複'],
+  [90201, '架空　継子', 'フル', new Date(2025, 7, 1), '', '未入力', '', '変・複'],
+  [90201, '架空　継子', 'パート(時間額)', new Date(2024, 3, 1), new Date(2025, 6, 31), '任期満了', '', '変・複'],
+];
+test('人事システムの任用：在職期間を読み、継続（途切れなし）と区分の変化を判定', () => {
+  const res = C.parseJinjiNinyo(JINJI_ROWS);
+  assert.ifError(res.error);
+  assert.strictEqual(res.records.length, 3);
+  const open = res.records.find((r) => r.start === '2025-08-01');
+  assert.strictEqual(open.end, '');
+  assert.strictEqual(open.reason, ''); // 「未入力」は空欄扱い
+  assert.strictEqual(open.kubun, 'full');
+  assert.strictEqual(res.records[2].kubun, 'part_hourly');
+  const d = baseData();
+  d.staff[0].employment = res.records.map(({ _row, number, name, ...p }) => p);
+  const tl = C.employmentTimeline(d.staff[0]);
+  assert.deepStrictEqual(tl.map((p) => p.continuous), [null, true, true]);
+  // R8の任用：勤続は R4.9.12 から通算、フルの継続は R7.8.1 から（間にパート期間）
+  const r8 = appt({ id: 'r8', type: 'full', payType: 'monthly', weeklyHours: 38.75, yearInService: 1 });
+  d.appointments.push(r8);
+  assert.strictEqual(C.serviceStartOf(d, r8, false).date, '2022-09-12');
+  assert.strictEqual(C.serviceStartOf(d, r8, false).source, 'jinji');
+  assert.strictEqual(C.fullTimeServiceStart(d, r8).date, '2025-08-01');
+  assert.strictEqual(C.fullTimeSwitchDates(d, r8, d.settings).taishu, '2026-02-01');
+  // 在職期間の外の任用は要確認
+  const outside = appt({ id: 'o', fiscalYear: 2021, start: '2021-04-01', end: '2022-03-31' });
+  assert.ok(C.validateAppointment(outside, d, d.settings).some((i) => /人事システムの任用/.test(i.msg)));
+  assert.ok(!C.validateAppointment(r8, d, d.settings).some((i) => /人事システムの任用/.test(i.msg)));
+});
+
+test('人事システムの任用：途切れがあれば途切れた後から数える', () => {
+  const d = baseData();
+  d.staff[0].employment = [
+    { kubun: 'part_monthly', start: '2020-04-01', end: '2022-03-31' },
+    { kubun: 'part_monthly', start: '2023-04-01', end: '' },
+  ];
+  const r8 = appt({ id: 'r8' });
+  assert.deepStrictEqual(C.employmentTimeline(d.staff[0]).map((p) => p.gapDays), [null, 365]);
+  assert.strictEqual(C.serviceStartOf(d, r8, false).date, '2023-04-01');
+  assert.strictEqual(C.continuousServiceYears(d, r8), 3);
+});
+
+const NENSU_ROWS = [
+  ['番号', '会計年度\r\n任用年数', '身分', '氏名', '所属名', '職名'],
+  [90301, 1, 'パート(月額)', '架空　一年', '総務部総務課', '事務補助員'],
+  [90302, 3, 'パート(月額)', '架空　三年', '福祉部福祉課', '介護支援専門員'],
+];
+test('年数確認データ：会計年度任用年数（3年周期の年目）を読み、公募の判断に使う', () => {
+  const res = C.parseNensu(NENSU_ROWS);
+  assert.ifError(res.error);
+  assert.deepStrictEqual(res.records.map((r) => [r.number, r.years, r.dept, r.title]), [['90301', 1, '総務部総務課', '事務補助員'], ['90302', 3, '福祉部福祉課', '介護支援専門員']]);
+  const d = baseData();
+  d.staff[0].cycleYears = { 2026: 3 };
+  const a = appt({ id: 'a', recruitMethod: 'reappoint' }); // 任用には年目の入力なし
+  d.appointments.push(a);
+  assert.strictEqual(C.yearInServiceOf(d, a), 3);
+  assert.strictEqual(C.publicRecruitFy(d, a, d.settings), 2027);
+  // 翌年度は4年目 → 公募
+  d.evaluations.push({ id: 'e', staffId: 's1', fiscalYear: 2026, recommend: 'yes', wish: 'yes' });
+  assert.strictEqual(C.buildNextYearPlan(d, 2026, d.settings)[0].overLimit, true);
+  // 任用に年目の入力があればそちらが優先
+  assert.strictEqual(C.yearInServiceOf(d, { ...a, yearInService: 2 }), 2);
+});
+
+test('経歴：任用一覧に任用がなくても人事システムの在職期間・年数確認データから要約を出す', () => {
+  const d = baseData();
+  d.staff[0].employment = [{ kubun: 'full', kubunText: 'フル', start: '2022-09-12', end: '2024-03-31' }, { kubun: 'full', kubunText: 'フル', start: '2024-04-01', end: '' }];
+  d.staff[0].cycleYears = { 2026: 3 };
+  const sm = C.careerOf(d, 's1', d.settings, '2026-09-28').summary;
+  assert.strictEqual(sm.firstStart, '2022-09-12');
+  assert.strictEqual(sm.serviceStart, '2022-09-12');
+  assert.strictEqual(sm.serviceSource, 'jinji');
+  assert.strictEqual(sm.serviceYears, 5); // R4.9.12→R8.9.28：4年と端数 → 5年
+  assert.strictEqual(sm.cycleYear, 3);
+  assert.strictEqual(sm.publicFy, 2027);
+});

@@ -545,3 +545,7 @@ select.intent-select.empty { border-color: var(--warning-border); background: va
 #panel-recruit h3, #panel-reappoint h3 { margin-top: 20px; }
 .badge.st-ok, .badge.st-info, .badge.st-warn, .badge.st-err, .badge.st-muted { white-space: normal; display: inline-block; }
 .tabs { flex-wrap: wrap; overflow-x: visible; }
+
+.import-guide { margin-bottom: 14px; max-height: none; }
+.import-guide td { white-space: normal; font-size: 12px; min-width: 120px; }
+.import-guide td:nth-child(4) { min-width: 240px; }

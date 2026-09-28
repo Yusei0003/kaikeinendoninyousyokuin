@@ -198,6 +198,17 @@
    * 任用一覧の「会計年度（何年目）」が入っている任用はその値を正とする（年目−1回）。
    * 同一年度内の任期の更新は再度の任用に数えない。
    */
+  function staffOf(data, id) { return (data.staff || []).find((s) => s.id === id) || null; }
+  /** 年数確認データで取り込んだ「会計年度任用年数」（職員ごと・年度ごと） */
+  function cycleYearFromStaff(data, a) {
+    const st = staffOf(data, a.staffId);
+    if (!st || !st.cycleYears || !parseISO(a.start)) return 0;
+    return Number(st.cycleYears[fiscalYearOf(a.start)]) || 0;
+  }
+  /** 任用に明示された3年周期の年目（任用の入力 → 年数確認データの順） */
+  function explicitCycleYear(data, a) {
+    return Number(a.yearInService) > 0 ? Number(a.yearInService) : cycleYearFromStaff(data, a);
+  }
   function consecutiveReappointCount(data, staffId, uptoAppt) {
     const list = appointmentsOfStaff(data, staffId).filter((a) => a.status !== 'canceled' && (!uptoAppt || a.id !== uptoAppt.id));
     if (uptoAppt) list.push(uptoAppt);
@@ -206,7 +217,8 @@
     let lastFy = null;
     for (const a of list) {
       const fy = a.fiscalYear != null && a.fiscalYear !== '' ? Number(a.fiscalYear) : fiscalYearOf(a.start);
-      if (Number(a.yearInService) > 0) count = Number(a.yearInService) - 1;
+      const ey = explicitCycleYear(data, a);
+      if (ey > 0) count = ey - 1;
       else if (a.recruitMethod === 'public') count = 0;
       else if (a.recruitMethod === 'reappoint' && fy !== lastFy) count += 1;
       lastFy = fy;
@@ -226,7 +238,8 @@
   }
   /** 公募から数えて何年目（会計年度）の任用か */
   function yearInServiceOf(data, appt) {
-    if (Number(appt.yearInService) > 0) return Number(appt.yearInService);
+    const ey = explicitCycleYear(data, appt);
+    if (ey > 0) return ey;
     if (!appt.staffId) return 1;
     return consecutiveReappointCount(data, appt.staffId, appt) + 1;
   }
@@ -301,6 +314,9 @@
       if (!prev) break;
       cur = prev;
     }
+    // 人事システムの任用（在職期間）があれば、それで切れ目なく続く期間の開始日を使う
+    const emp = employmentChainStart(staffOf(data, appt.staffId), appt.start, fullOnly);
+    if (emp) return { date: emp, estimated: false, manual: false, source: 'jinji' };
     if (!fullOnly) {
       const staff = (data.staff || []).find((x) => x.id === appt.staffId);
       const earlier = appointmentsOfStaff(data, appt.staffId).some((a) => a.status !== 'canceled' && a.id !== cur.id && a.start < cur.start);
@@ -314,6 +330,131 @@
     }
     return { date: cur.start, estimated: false, manual: false, source: 'history' };
   }
+  /* ------------------------------------------------------------
+   * 人事システムの任用（在職期間）：人事sys→ﾆ 任用 の検索結果
+   * 1行＝1つの在職期間（区分が変わると別の行）。終了日が空欄なら継続中。
+   * ------------------------------------------------------------ */
+  function kubunFromText(v) {
+    const t = String(v == null ? '' : v).normalize('NFKC');
+    if (/フル/.test(t)) return 'full';
+    if (/時間/.test(t)) return 'part_hourly';
+    if (/日額/.test(t)) return 'part_daily';
+    if (/月額|パート/.test(t)) return 'part_monthly';
+    return '';
+  }
+  function sortedPeriods(staff, fullOnly) {
+    return ((staff && staff.employment) || [])
+      .filter((p) => parseISO(p.start) && (!fullOnly || p.kubun === 'full'))
+      .slice().sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  }
+  /** iso を含む在職期間から、前の期間の終了日の翌日に始まる期間を切れ目なくさかのぼった開始日 */
+  function employmentChainStart(staff, iso, fullOnly) {
+    const ps = sortedPeriods(staff, fullOnly);
+    let cur = ps.find((p) => p.start <= iso && (!p.end || iso <= p.end));
+    if (!cur) return null;
+    for (;;) {
+      const prev = ps.find((p) => p.end && addDaysISO(p.end, 1) === cur.start);
+      if (!prev) break;
+      cur = prev;
+    }
+    return cur.start;
+  }
+  /** 在職期間の一覧に、前の期間とのつながり（連続／空き日数）を付ける */
+  function employmentTimeline(staff) {
+    const ps = sortedPeriods(staff, false);
+    return ps.map((p, i) => {
+      const prev = ps[i - 1];
+      const gap = prev && prev.end ? diffDays(prev.end, p.start) - 1 : null;
+      return { ...p, gapDays: prev ? gap : null, continuous: prev ? gap === 0 : null };
+    });
+  }
+  /** 人事システムの任用の行を取込用レコードに変換する */
+  function parseJinjiNinyo(rows) {
+    let headerRow = -1;
+    const map = {};
+    const tests = [
+      ['number', (h) => h === '職員番号' || h === '番号'],
+      ['name', (h) => h === '氏名'],
+      ['kubun', (h) => h === '区分'],
+      ['start', (h) => h === '開始日'],
+      ['end', (h) => h === '終了日'],
+      ['reason', (h) => h === '退職事由'],
+      ['note', (h) => h === '備考'],
+    ];
+    for (let r = 0; r < Math.min(rows.length, 10); r++) {
+      const hs = (rows[r] || []).map((h) => String(h == null ? '' : h).normalize('NFKC').replace(/\s/g, ''));
+      if (!hs.includes('開始日') || !hs.includes('氏名')) continue;
+      headerRow = r;
+      hs.forEach((h, i) => { const hit = tests.find(([f, t]) => map[f] === undefined && t(h)); if (hit) map[hit[0]] = i; });
+      break;
+    }
+    if (headerRow < 0) return { records: [], skipped: [], error: '「職員番号」「氏名」「区分」「開始日」「終了日」の見出しがある行が見つかりません。人事システムの任用の検索結果か確認してください。' };
+    const get = (row, f) => (map[f] === undefined ? '' : row[map[f]]);
+    const records = [];
+    const skipped = [];
+    for (let r = headerRow + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      if (!row.some((c) => c != null && c !== '')) continue;
+      const name = cellText(get(row, 'name'));
+      const start = excelValueToISO(get(row, 'start'));
+      if (!name) { skipped.push({ row: r + 1, reason: '氏名が空欄' }); continue; }
+      if (!start) { skipped.push({ row: r + 1, reason: '開始日が読み取れません' }); continue; }
+      const reason = cellText(get(row, 'reason'));
+      records.push({
+        _row: r + 1,
+        number: cellText(get(row, 'number')),
+        name,
+        kubunText: cellText(get(row, 'kubun')),
+        kubun: kubunFromText(get(row, 'kubun')),
+        start,
+        end: excelValueToISO(get(row, 'end')),
+        reason: reason === '未入力' ? '' : reason,
+        note: cellText(get(row, 'note')),
+      });
+    }
+    return { records, skipped, headerRow, map };
+  }
+
+  /* ------------------------------------------------------------
+   * 年数確認データ（3年周期の何年目か）：番号・会計年度任用年数・身分・氏名・所属名・職名
+   * ------------------------------------------------------------ */
+  function parseNensu(rows) {
+    let headerRow = -1;
+    const map = {};
+    const tests = [
+      ['number', (h) => h === '番号' || h === '職員番号'],
+      ['years', (h) => h.startsWith('会計年度任用年数') || h === '任用年数' || h === '年数'],
+      ['kubun', (h) => h === '身分' || h === '区分'],
+      ['name', (h) => h === '氏名'],
+      ['dept', (h) => h === '所属名' || h === '所属'],
+      ['title', (h) => h === '職名'],
+    ];
+    for (let r = 0; r < Math.min(rows.length, 10); r++) {
+      const hs = (rows[r] || []).map((h) => String(h == null ? '' : h).normalize('NFKC').replace(/\s/g, ''));
+      if (!hs.includes('氏名') || !hs.some((h) => h.includes('任用年数') || h === '年数')) continue;
+      headerRow = r;
+      hs.forEach((h, i) => { const hit = tests.find(([f, t]) => map[f] === undefined && t(h)); if (hit) map[hit[0]] = i; });
+      break;
+    }
+    if (headerRow < 0) return { records: [], skipped: [], error: '「番号」「会計年度任用年数」「氏名」の見出しがある行が見つかりません。年数確認データか確認してください。' };
+    const get = (row, f) => (map[f] === undefined ? '' : row[map[f]]);
+    const records = [];
+    const skipped = [];
+    for (let r = headerRow + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      if (!row.some((c) => c != null && c !== '')) continue;
+      const name = cellText(get(row, 'name'));
+      const years = Number(String(get(row, 'years')).normalize('NFKC').replace(/[^0-9]/g, ''));
+      if (!name) { skipped.push({ row: r + 1, reason: '氏名が空欄' }); continue; }
+      if (!(years > 0)) { skipped.push({ row: r + 1, reason: '会計年度任用年数が読み取れません' }); continue; }
+      records.push({
+        _row: r + 1, number: cellText(get(row, 'number')), name, years,
+        kubunText: cellText(get(row, 'kubun')), dept: cellText(get(row, 'dept')), title: cellText(get(row, 'title')),
+      });
+    }
+    return { records, skipped, headerRow, map };
+  }
+
   /** フルタイムとして継続して勤務している開始日（退手・共済の切替の起算日） */
   function fullTimeServiceStart(data, appt) {
     if (appt.type !== 'full') return null;
@@ -523,6 +664,11 @@
         warn(`年休は${days}日と判定されます（入力：${appt.annualLeave}日。前年度からの繰越分は含めません）。`, `${MAN('第Ⅴ章1')}／年次休暇の規定（週29時間以上のただし書、継続勤務年数の端数は1年）`);
       }
     }
+    const empStaff = staffOf(data, appt.staffId);
+    if (s && empStaff && (empStaff.employment || []).length) {
+      const inside = empStaff.employment.some((p) => p.start <= appt.start && (!p.end || appt.start <= p.end));
+      if (!inside) warn('任期の開始日が、人事システムの任用（在職期間）のどの期間にも含まれていません。人事システムの任用の登録・退職の入力を確認してください。', '人事システムの任用');
+    }
     if (/保育士/.test(appt.title || '') && normInsText(appt.hoikushiCheck) !== '済') {
       warn('保育士の任用です。保育士特定登録取消者管理システムの確認が「済」になっていません。', '任用一覧の確認項目');
     }
@@ -628,22 +774,34 @@
     const current = todayISO ? list.find((a) => a.start <= todayISO && todayISO <= a.end) || null : null;
     const ss = last ? serviceStartOf(data, last, false) : null;
     const staff = (data.staff || []).find((x) => x.id === staffId);
-    const firstAppt = list.length ? list[0].start : null;
+    const empFirst = sortedPeriods(staff, false)[0];
+    const firstAppt = [list.length ? list[0].start : null, empFirst ? empFirst.start : null].filter(Boolean).sort()[0] || null;
     const hire = staff && parseISO(staff.hireDate) ? staff.hireDate : null;
+    // 任用一覧に任用がなくても、人事システムの在職期間・年数確認データから勤続と年目を出す
+    let ssAlt = null;
+    let syAlt = null;
+    if (!last && todayISO && staff) {
+      const pseudo = { id: '_', staffId, start: todayISO, end: todayISO };
+      const e = employmentChainStart(staff, todayISO, false);
+      if (e) { ssAlt = { date: e, estimated: false, source: 'jinji' }; syAlt = continuousServiceYears(data, pseudo); }
+    }
+    const cycleFys = Object.keys((staff && staff.cycleYears) || {}).map(Number).sort((a, b) => b - a);
+    const cycleAlt = !last && cycleFys.length ? { year: Number(staff.cycleYears[cycleFys[0]]), fy: cycleFys[0] } : null;
     return {
       rows,
       summary: {
         firstStart: hire && (!firstAppt || hire < firstAppt) ? hire : firstAppt,
-        firstStartSource: hire && (!firstAppt || hire <= firstAppt) ? 'roster' : 'history',
-        serviceSource: ss ? ss.source : null,
-        serviceStart: ss ? ss.date : null,
+        firstStartSource: hire && (!firstAppt || hire <= firstAppt) ? 'roster' : empFirst && empFirst.start === firstAppt ? 'jinji' : 'history',
+        serviceSource: ss ? ss.source : ssAlt ? ssAlt.source : null,
+        serviceStart: ss ? ss.date : ssAlt ? ssAlt.date : null,
         serviceEstimated: ss ? ss.estimated : false,
-        serviceYears: last ? continuousServiceYears(data, last) : null,
+        serviceYears: last ? continuousServiceYears(data, last) : syAlt,
         fiscalYears: [...new Set(list.map((a) => fiscalYearOf(a.start)))].length,
         current,
         last,
-        cycleYear: last ? yearInServiceOf(data, last) : null,
-        publicFy: last ? publicRecruitFy(data, last, settings) : null,
+        cycleYear: last ? yearInServiceOf(data, last) : cycleAlt ? cycleAlt.year : null,
+        publicFy: last ? publicRecruitFy(data, last, settings)
+          : cycleAlt && settings.reappointLimit != null && settings.reappointLimit !== '' ? cycleAlt.fy + Number(settings.reappointLimit) + 2 - cycleAlt.year : null,
         deptChanges: rows.filter((r) => r.changes.some((c) => c.kind === 'dept')).length,
         titleChanges: rows.filter((r) => r.changes.some((c) => c.kind === 'title')).length,
       },
@@ -1456,6 +1614,7 @@
     fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     parseMeibo, parseMeiboGender, isMeiboTarget, findStaffForMeibo, hasAppointmentOn,
+    parseJinjiNinyo, parseNensu, employmentChainStart, employmentTimeline, kubunFromText, cycleYearFromStaff,
     appointmentStatus, expiringAppointments,
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
