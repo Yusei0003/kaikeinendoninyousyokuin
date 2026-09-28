@@ -1134,7 +1134,7 @@ async function onImportFile() {
   if (!file) return;
   try {
     const wb = await readWorkbook(file);
-    importState = { wb, fileName: file.name };
+    importState = { wb, fileName: file.name, nensuFy: null };
     const sel = document.getElementById('import-sheet');
     sel.innerHTML = wb.SheetNames.map((n) => `<option>${escapeHtml(n)}</option>`).join('');
     // 見出しから名簿・任用一覧を自動判別（データのあるシートを選ぶ）
@@ -1259,13 +1259,19 @@ function renderNensuPreview(box, ws) {
   importState.result = res;
   importState.kind = 'nensu';
   if (res.error) { box.innerHTML = `<p class="error-text">${escapeHtml(res.error)}</p>`; return; }
-  const fy = currentFy();
+  // 何年度の年目として取り込むか（既定は画面上部で選んでいる年度）
+  if (!importState.nensuFy) importState.nensuFy = currentFy();
+  const fy = importState.nensuFy;
+  const baseFy = C.fiscalYearOf(todayISO());
+  const fyOptions = [...new Set([baseFy - 2, baseFy - 1, baseFy, baseFy + 1, baseFy + 2, currentFy(), fy])].sort((a, b) => a - b);
   const limit = Number(DATA.settings.reappointLimit);
   box.innerHTML = `
     <h3>取込内容の確認（年数確認データ）</h3>
     <div class="import-summary">
       <div><strong>見出し行：</strong>${res.headerRow + 1}行目／<strong>対象：</strong>${res.records.length}人</div>
-      <div><strong>「会計年度任用年数」を <span class="badge warn">${C.fyLabel(fy)}</span> の3年周期の年目として取り込みます。</strong>別の年度のデータの場合は、画面上部の年度ボタンで年度を切り替えてから取り込んでください。</div>
+      <div class="nensu-fy"><label><strong>「会計年度任用年数」を何年度の年目として取り込むか</strong>
+        <select id="nensu-fy">${fyOptions.map((y) => `<option value="${y}"${y === fy ? ' selected' : ''}>${C.fyLabel(y)}（${y}）${y === baseFy ? '・今年度' : y === baseFy + 1 ? '・翌年度' : ''}</option>`).join('')}</select></label>
+        <small class="muted">例：今年度の年目をまとめたデータなら今年度、翌年度に何年目になるかをまとめたデータなら翌年度を選びます。</small></div>
       <div class="muted">${C.fyLabel(fy)}の任用がある職員は、その任用の「会計年度（3年周期の何年目）」にも入れます。${limit + 1}年目の職員は翌年度が公募の対象になります（市マニュアル第Ⅷ章2）。</div>
     </div>
     ${res.skipped.length ? `<details><summary>取り込まない行（${res.skipped.length}件）</summary><ul>${res.skipped.map((x) => `<li>${x.row}行目：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
@@ -1281,6 +1287,7 @@ function renderNensuPreview(box, ws) {
         <td>${hit ? `<span class="badge">更新</span> ${escapeHtml(hit.name)}` : '<span class="badge ok">新規</span>'}</td></tr>`;
     }), '取り込む職員がいません。')}
     <div class="row-actions"><button class="btn-primary" id="btn-import-run"${res.records.length ? '' : ' disabled'}>${C.fyLabel(fy)}の年目として取り込む</button></div>`;
+  document.getElementById('nensu-fy').onchange = (e) => { importState.nensuFy = Number(e.target.value); renderImportPreview(); };
   document.getElementById('btn-import-run').onclick = runImport;
 }
 /** 名簿の採用日を含む任用が未登録の職員（新規採用者の任用登録漏れ） */
@@ -1365,7 +1372,8 @@ function planImport(kind, records, createStaff, apply = false) {
     return out;
   }
   if (kind === 'nensu') {
-    const fy = currentFy();
+    const fy = (importState && importState.nensuFy) || currentFy();
+    out.fy = fy;
     out.changedYears = 0;
     for (const r of records) {
       let s = C.findStaffForMeibo(target, r);
@@ -1475,7 +1483,7 @@ function runImport() {
       ${tableHtml(['氏名', '在職期間'], noAppt.map((st) => `<tr><td>${nameLink(st.id)}</td><td>${C.employmentTimeline(st).map((x) => periodText(x, true)).join('<br>')}</td></tr>`), '該当する職員はいません。')}`;
   }
   if (kind === 'nensu') {
-    box.innerHTML += `<p class="muted">${C.fyLabel(currentFy())}の任用の年目を${res.changedYears || 0}件更新しました。「年目・任用意向」タブで確認できます。</p>`;
+    box.innerHTML += `<p class="muted">${C.fyLabel(res.fy)}の年目として取り込み、${C.fyLabel(res.fy)}の任用の年目を${res.changedYears || 0}件更新しました。「年目・任用意向」タブ（画面上部で${C.fyLabel(res.fy)}を選択）で確認できます。</p>`;
   }
   if (kind === 'meibo') {
     // 初めて使うときは過去の採用者も含まれるため、対象年度以降の採用日に限る（過去の任用は任用一覧の取込で登録）

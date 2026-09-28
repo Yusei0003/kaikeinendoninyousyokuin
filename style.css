@@ -549,3 +549,7 @@ select.intent-select.empty { border-color: var(--warning-border); background: va
 .import-guide { margin-bottom: 14px; max-height: none; }
 .import-guide td { white-space: normal; font-size: 12px; min-width: 120px; }
 .import-guide td:nth-child(4) { min-width: 240px; }
+
+.nensu-fy { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.nensu-fy label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nensu-fy select { border: 2px solid var(--warning-border); border-radius: 6px; padding: 6px 10px; font-size: 14px; font-weight: 700; background: var(--warning-bg); }
