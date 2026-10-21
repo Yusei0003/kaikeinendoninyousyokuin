@@ -674,22 +674,46 @@ test('年度替わり事務：令和8年度任用は通知どおりの日程、�
   const d = C.emptyData();
   assert.strictEqual(C.ensureYearEnd(d, 2026), true);
   assert.strictEqual(C.ensureYearEnd(d, 2026), false); // 2回目は作らない
-  const due = (fy, key) => C.yearEndItems(d, fy).find((x) => x.key === key);
-  assert.deepStrictEqual(['kibo', 'kakunin', 'shokushu', 'boshu', 'senko', 'kekka', 'tsuchi', 'kian', 'taishoku'].map((k) => due(2026, k).due),
-    ['2025-11-21', '2025-12-08', '2026-01-16', '2026-01-30', '2026-02-20', '2026-02-27', '2026-03-19', '2026-03-23', '2026-03-31']);
-  assert.strictEqual(due(2026, 'boshu').start, '2026-01-22');
+  const v = (fy) => Object.fromEntries(C.yearEndView(d, fy, '2026-02-10', d.settings).map((n) => [n.key, n]));
+  const r8 = v(2026);
+  assert.deepStrictEqual(['kibo', 'kakunin', 'boshu', 'saido', 'senko', 'kirikae'].map((k) => [r8[k].dates.notice, r8[k].dates.due]), [
+    ['2025-11-05', '2025-11-21'], ['2025-11-28', '2025-12-08'], ['2026-01-08', '2026-01-16'],
+    ['2026-01-08', '2026-03-19'], ['2026-01-26', '2026-02-27'], ['2026-02-26', '2026-03-23']]);
+  assert.strictEqual(r8.kirikae.dates.due2, '2026-03-31');
+  const step = (n, k) => n.steps.find((s) => s.key === k);
+  assert.strictEqual(step(r8.boshu, 'kaishi').date, '2026-01-22');
+  assert.strictEqual(step(r8.boshu, 'hassin').date, '2026-01-08');
+  assert.strictEqual(step(r8.boshu, 'ichiran').date, '2025-12-26'); // 12/29は年末年始 → 前の開庁日
+  assert.strictEqual(r8.kibo.state, 'overdue');
+  assert.strictEqual(r8.kibo.next.key, 'sakusei');
+  // 作業を済にすると次にやることが進む
+  d.yearEnd[2026].notices.kibo.steps.sakusei = '2025-10-29';
+  assert.strictEqual(v(2026).kibo.next.key, 'kessai');
+  // 通知日を直すと作業の目安日も動く
+  d.yearEnd[2026].notices.kibo.dates.notice = '2025-11-10';
+  assert.strictEqual(step(v(2026).kibo, 'hassin').date, '2025-11-10');
   C.ensureYearEnd(d, 2027);
-  assert.strictEqual(due(2027, 'kibo').due, '2026-11-20'); // R8.11.21は土曜 → 前の金曜
-  assert.strictEqual(due(2027, 'ninyo').due, '2027-04-01');
+  assert.strictEqual(v(2027).kibo.dates.due, '2026-11-20'); // R8.11.21は土曜 → 前の金曜
   C.ensureYearEnd(d, 2028);
-  assert.strictEqual(due(2028, 'boshu').start, '2028-01-24'); // 開始日は土日なら後ろへ
-  // 閉庁日：春分の日・振替休日・年末年始
+  assert.strictEqual(step(v(2028).boshu, 'kaishi').date, '2028-01-24'); // 開始日は土日なら後ろへ
+  // 閉庁日：春分の日・振替休日・年末年始・成人の日
   assert.strictEqual(C.isClosedDay('2026-03-20'), true);
-  assert.strictEqual(C.isClosedDay('2027-03-22'), true); // 春分の日（日）の振替
+  assert.strictEqual(C.isClosedDay('2027-03-22'), true);
   assert.strictEqual(C.isClosedDay('2026-12-29'), true);
-  assert.strictEqual(C.isClosedDay('2027-01-11'), true); // 成人の日
+  assert.strictEqual(C.isClosedDay('2027-01-11'), true);
   assert.strictEqual(C.isClosedDay('2026-03-19'), false);
-  assert.strictEqual(C.yearEndState({ due: '2026-03-19', done: false }, '2026-03-20'), 'overdue');
-  assert.strictEqual(C.yearEndState({ due: '2026-03-19', done: false }, '2026-03-10'), 'soon');
   assert.deepStrictEqual(C.normalizeData({}).yearEnd, {});
+});
+
+test('年度替わり事務：回答を受け付ける課を任用・意向から挙げる', () => {
+  const d = baseData();
+  d.appointments.push(appt({ id: 'a1', start: '2025-04-01', end: '2026-03-31', dept: '総務課' }));
+  C.ensureYearEnd(d, 2026);
+  const n = Object.fromEntries(C.yearEndView(d, 2026, '2025-11-01', d.settings).map((x) => [x.key, x]));
+  assert.deepStrictEqual(n.kibo.tracker.rows.map((r) => r.key), ['総務課']);
+  assert.deepStrictEqual(n.kakunin.tracker.rows.map((r) => r.key), ['総務課']); // 希望 未確認
+  d.yearEnd[2026].notices.kibo.responses['総務課'] = { s: 'done', at: '2025-11-20' };
+  d.yearEnd[2026].notices.kibo.responses['企画課'] = { s: '', at: '' }; // 手で追加した課
+  const k = C.yearEndView(d, 2026, '2025-11-01', d.settings)[0].tracker;
+  assert.deepStrictEqual([k.done, k.total], [1, 2]);
 });

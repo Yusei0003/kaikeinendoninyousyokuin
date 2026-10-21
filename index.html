@@ -205,14 +205,16 @@
       <div class="card-header-row">
         <h2 id="yearend-title">年度替わり事務</h2>
         <div class="row-actions">
-          <button class="btn-secondary" id="btn-yearend-add">項目を追加</button>
           <button class="btn-secondary" id="btn-yearend-reset">日程を計算し直す</button>
           <button class="btn-secondary" id="btn-yearend-export">Excelに書き出す</button>
         </div>
       </div>
-      <p class="hint">対象年度の職員を翌年度4月1日に任用するまでの手続き（任用希望調査 → 再度の任用の希望確認 → 募集・選考 → 再度の任用の通知 → 任用の起案 → 退職者の書類提出）のチェックリストです。<strong>年度を開くと、その年度の分が自動で作られます。</strong>期限は令和8年度任用の総務課長通知の日程をもとに、土日・祝日・年末年始を避けて計算した目安です。その年の通知が出たら期限を直してください。確認項目をすべてチェックすると完了になります。</p>
+      <p class="hint">翌年度4月1日の任用に向けて総務課（職員係）が出す通知ごとに、<strong>作成 → 決裁 → 通知 → 回答の受付 → 督促 → 取りまとめ</strong>の進み具合と、<strong>課ごとの回答の状況</strong>を記録します。<strong>年度を開くと、その年度の分が自動で作られます。</strong>日付は令和8年度任用の総務課長通知の日程をもとに、土日・祝日・年末年始を避けて計算した目安です（通知日・期限は直せます。作業の目安日は通知日・期限に合わせて動きます）。回答がすべてそろうと「回答の受付」が完了になります。</p>
       <p id="yearend-created" class="hint"></p>
       <div id="yearend-summary" class="mini-stats"></div>
+      <h3>通知ごとの進み具合 <small class="muted">（行を押すとその通知だけを表示）</small></h3>
+      <div id="yearend-overview"></div>
+      <div class="row-actions"><button class="btn-small hidden" id="yearend-showall">すべての通知を表示</button></div>
       <div id="yearend-list" class="ye-list"></div>
     </div>
   </section>

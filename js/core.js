@@ -1662,88 +1662,192 @@
     kirikae: '年度切替に伴う会計年度任用職員の任用及び退職に係る事務手続きについて（R8.2.26 総務課長通知）',
   };
   /**
-   * ひな形。notice=通知日、start=期間の開始、due=期限（いずれも[月,日]）。
-   * who: 誰がするか、tab: 関係するタブ
+   * 総務課（職員係）が通知ごとに行うこと。
+   * notice=通知日、due=回答・提出期限、due2=2つ目の期限（[月,日]。令和8年度任用の通知の日程）。
+   * steps[].at：['notice'|'due'|'due2', ずらす日数] または ['md', [月,日], 'before'|'after']
+   * tracker：回答の受付状況を記録する相手（課・職員）の種類
    */
-  const YEAR_END_TEMPLATE = [
-    { key: 'kibo', title: '任用希望調査の報告', who: '各課→総務課', notice: [11, 5], due: [11, 21], tab: 'recruit', src: 'kibo',
-      checks: ['翌年度に新たに任用を希望する職を「任用希望調査シート」に記入（職務内容等）', '今年度で廃止する事業の会計年度任用職員を報告', 'グループウェアのメッセージで総務課職員係へ送信'],
-      notes: ['引き続き任用を希望する職員（4会計年度目以降の公募を含む）は報告不要', '総務課が職員の必要性を聞き取る場合あり'] },
-    { key: 'mendan', title: '人事評価面談で再度の任用の希望を確認', who: '各課', due: [11, 27], tab: 'intent', src: '',
-      checks: ['面談で本人の再度の任用の希望の有無を確認', '「年目・任用意向」タブに可否・本人の希望を入力'],
-      notes: ['期限は目安（次の確認通知の前日）。通知文はありません'] },
-    { key: 'kakunin', title: '再度の任用の希望の確認（面談で確認できなかった職員）', who: '各課→総務課', notice: [11, 28], due: [12, 8], tab: 'intent', src: 'kakunin',
-      checks: ['別紙一覧の職員に希望の有無を確認', '総務課へ提出'],
-      notes: ['任用開始から3会計年度目の職員は、人事評価の結果による再度の任用の対象外。翌年度も任用する予定なら公募（再度の応募は可）'] },
-    { key: 'shokushu', title: '募集職種一覧の確認・修正', who: '各課→総務課', notice: [1, 8], due: [1, 16], tab: 'recruit', src: 'boshu',
-      checks: ['別添「募集職種一覧」の内容を確認', '加筆修正があれば朱書き訂正して総務課職員係へ提出'] },
-    { key: 'boshu', title: '募集（ハローワークインターネットサービス）', who: '総務課', start: [1, 22], due: [1, 30], startDir: 'after', tab: 'recruit', src: 'boshu',
-      checks: ['ハローワークインターネットサービスへ求人申込み', '募集開始', '募集締切'],
-      notes: ['募集人数に達した場合は受付期間内でも締め切ってよい'] },
-    { key: 'senko', title: '選考（書類審査又は面接審査）', who: '各課', notice: [1, 26], start: [2, 2], due: [2, 20], startDir: 'after', tab: 'exam', src: 'senko',
-      checks: ['選考方法（書類審査か面接審査か）を決める', '面接の日程を申込者と調整', '他職種との併願者は担当課間で調整（紹介状は併願数分提出される）', '書類審査は「書類審査採点表」、面接審査は「面接評定表」で採点', '採用者を決定'],
-      notes: ['様式の保存先：P:\\1100-総務課\\01-共通\\R◯会計年度任用職員様式集'] },
-    { key: 'kekka', title: '合否通知・選考結果の報告', who: '各課→総務課', due: [2, 27], tab: 'exam', src: 'senko',
-      checks: ['応募者へ合格・不合格を通知', '選考結果の伺い文書を総務課へ回覧', '添付：応募者一覧表', '添付：書類審査採点表又は面接評定表', '添付：応募者全員の応募申込書・職務等経歴書（必要に応じて資格証の写し）'] },
-    { key: 'yosan', title: '当初予算の議決（3月議会）', who: '議会', due: null, tab: '', src: 'saido', dateInput: true,
-      checks: ['議決日を記録する'],
-      notes: ['議決までは再度の任用は「見込み」として扱う', '任用の起案日・特定財源の職員への通知は議決後'] },
-    { key: 'tsuchi', title: '現職員へ再度の任用の通知', who: '各課', notice: [1, 8], due: [3, 19], tab: 'reappoint', src: 'saido',
-      checks: ['別添対象者一覧を確認（修正があれば総務課へ連絡）', '様式1：再度の任用を行う職員', '様式2：再度の任用を行わない職員', '様式3：再度の任用の対象とならない職員（3会計年度目）', '特定財源で人件費を措置している職員は予算の議決後に通知'],
-      notes: ['総務課合議は不要', '予算の議決までは再度の任用となる見込みとして扱う'] },
-    { key: 'kian', title: '4月1日付け任用の起案・総務課合議', who: '各課→総務課', notice: [2, 26], due: [3, 23], tab: 'reappoint', src: 'kirikae',
-      checks: ['記載例・任用予定者一覧を参考に起案（再度の任用となる職員を含む）', '起案日は当初予算の議決後の日付', '添付は辞令書・勤務条件通知書のみ（履歴書等は不要）', '総務課へ合議'] },
-    { key: 'taishoku', title: '3月31日付け退職職員の書類提出', who: '各課→総務課', notice: [2, 26], due: [3, 31], tab: 'retire', src: 'kirikae',
-      checks: ['資格確認証（マイナ保険証を取得していない場合）', 'タイムカード', '名札ケース'] },
-    { key: 'ninyo', title: '任用開始', who: '', due: [4, 1], dueDir: 'none', tab: 'appoint', src: '',
-      checks: ['辞令交付', '任用一覧に翌年度の任用が揃っているか確認'] },
+  const KESSAI = (n) => [
+    { key: 'kessai', label: '起案・決裁', at: ['notice', -2] },
+    { key: 'hassin', label: `関係部課等の長へ通知（${n}）`, at: ['notice', 0] },
   ];
-  /** 対象年度の日程（ひな形から計算） */
-  function yearEndDates(targetFy, t) {
+  const YEAR_END_NOTICES = [
+    { key: 'kibo', title: '任用希望調査', src: 'kibo', notice: [11, 5], due: [11, 21], dueLabel: '回答期限',
+      points: ['翌年度に新たに任用を希望する職（職務内容等）と、今年度で廃止する事業の職員を「任用希望調査シート」で報告してもらう', '引き続き任用する職員（4会計年度目以降の公募を含む）は報告不要', 'グループウェアのメッセージで職員係へ送信'],
+      tracker: { type: 'all', label: '回答', step: 'kaito' },
+      steps: [
+        { key: 'sakusei', label: '通知文・「任用希望調査シート」を作成', at: ['notice', -7] },
+        ...KESSAI('回答期限・送信先を明記'),
+        { key: 'kaito', label: '回答の受付（グループウェアのメッセージ）', at: ['due', 0] },
+        { key: 'tokusoku', label: '未回答の課へ督促', at: ['due', 1] },
+        { key: 'kikitori', label: '必要に応じて職員の必要性を聞き取り', at: ['due', 5] },
+        { key: 'matome', label: '取りまとめ：新規・増員の職を「公募職種」に入力、廃止事業の職員を確認', at: ['due', 7], tab: 'recruit' },
+      ] },
+    { key: 'kakunin', title: '再度の任用に係る確認', src: 'kakunin', notice: [11, 28], due: [12, 8], dueLabel: '提出期限',
+      points: ['人事評価面談の結果で、再度の任用の希望の有無が確認できなかった職員について、各課に本人へ確認してもらう', '任用開始から3会計年度目の職員は人事評価の結果による再度の任用の対象外（翌年度も任用するなら公募。再度の応募は可）'],
+      tracker: { type: 'wishMissing', label: '提出', step: 'kaito' },
+      steps: [
+        { key: 'chushutsu', label: '人事評価面談の結果から、希望の有無が未確認の職員を抽出（「年目・任用意向」の「希望 未確認」）', at: ['notice', -5], tab: 'intent' },
+        { key: 'ichiran', label: '別紙「対象職員一覧」を作成', at: ['notice', -3] },
+        ...KESSAI('別紙一覧を添付'),
+        { key: 'kaito', label: '提出の受付', at: ['due', 0] },
+        { key: 'tokusoku', label: '未提出の課へ督促', at: ['due', 1] },
+        { key: 'nyuryoku', label: '回答を「年目・任用意向」に入力（本人の希望）', at: ['due', 3], tab: 'intent' },
+        { key: 'matome', label: '取りまとめ：再度の任用の対象者・公募となる職を確定', at: ['due', 10], tab: 'reappoint' },
+      ] },
+    { key: 'boshu', title: '募集方法（募集職種一覧）', src: 'boshu', notice: [1, 8], due: [1, 16], dueLabel: '修正の提出期限',
+      points: ['選考スケジュール：募集 1/22〜1/30、選考 2/2〜2/20、合否通知・結果報告 2/27', '募集はハローワークインターネットサービスへの求人申込み', '募集職種一覧に加筆修正があれば朱書き訂正して提出してもらう', '募集人数に達した場合は受付期間内でも締め切ってよい'],
+      tracker: { type: 'recruit', label: '確認', step: 'kaito' },
+      steps: [
+        { key: 'ichiran', label: '「募集職種一覧」を作成（「公募職種」のまとめから）', at: ['notice', -10], tab: 'recruit' },
+        { key: 'annai', label: '「会計年度任用職員の募集について」（募集案内）を作成', at: ['notice', -7] },
+        ...KESSAI('募集職種一覧・募集案内を添付'),
+        { key: 'kaito', label: '募集職種一覧の修正（朱書き）の受付', at: ['due', 0] },
+        { key: 'kakutei', label: '募集職種一覧を確定', at: ['due', 2] },
+        { key: 'hw', label: 'ハローワークインターネットサービスへ求人申込み', at: ['md', [1, 21], 'before'] },
+        { key: 'kaishi', label: '募集開始', at: ['md', [1, 22], 'after'] },
+        { key: 'shimekiri', label: '募集締切', at: ['md', [1, 30], 'before'] },
+      ] },
+    { key: 'saido', title: '再度の任用（本人への通知）', src: 'saido', notice: [1, 8], due: [3, 19], dueLabel: '本人通知の期限',
+      points: ['各課から現職員へ、様式1（行う）・様式2（行わない）・様式3（対象外：3会計年度目）で通知してもらう', '予算の議決までは再度の任用となる見込みとして扱う', '特定財源で人件費を措置している職員は、予算の議決後に通知', '総務課合議は不要。対象者一覧に修正があれば連絡してもらう'],
+      tracker: { type: 'reappoint', label: '本人通知', step: 'kakunin' },
+      steps: [
+        { key: 'ichiran', label: '別添「対象者一覧」を作成（「再度の任用」の一覧を書き出し）', at: ['notice', -7], tab: 'reappoint' },
+        { key: 'yoshiki', label: '様式1・様式2・様式3を準備', at: ['notice', -5] },
+        ...KESSAI('対象者一覧・様式を添付'),
+        { key: 'shusei', label: '対象者一覧の修正連絡を受けて反映', at: ['due', -7] },
+        { key: 'tokutei', label: '特定財源の職員：予算の議決後に通知されたか確認', at: ['due', 0] },
+        { key: 'kakunin', label: '各課の本人通知の完了を確認', at: ['due', 0] },
+      ] },
+    { key: 'senko', title: '選考方法・選考結果報告', src: 'senko', notice: [1, 26], due: [2, 27], dueLabel: '結果報告の期限',
+      points: ['書類審査（書類審査採点表）又は面接審査（面接評定表）。どちらにするかは各課が判断', '面接の日程は各課が申込者と調整。併願者は担当課間で調整（紹介状は併願数分）', '結果報告に添付：応募者一覧表、採点表又は評定表、応募者全員の応募申込書・職務等経歴書（必要に応じて資格証の写し）'],
+      tracker: { type: 'recruit', label: '結果報告', step: 'kaito' },
+      steps: [
+        { key: 'yoshiki', label: '様式集を保存（P:\\1100-総務課\\01-共通\\R◯会計年度任用職員様式集）', at: ['notice', -3] },
+        ...KESSAI('様式の保存先を明記'),
+        { key: 'kaifu', label: '応募書類・紹介状を担当課へ回付', at: ['md', [2, 2], 'after'] },
+        { key: 'kaito', label: '選考結果報告（伺い文書の回覧）の受付', at: ['due', 0] },
+        { key: 'tenpu', label: '添付書類を確認（応募者一覧表・採点表/評定表・申込書等）', at: ['due', 2] },
+        { key: 'gokaku', label: '合格者を「採用試験」に記録し、翌年度の任用を登録', at: ['due', 7], tab: 'exam' },
+      ] },
+    { key: 'kirikae', title: '年度切替の任用・退職の事務手続き', src: 'kirikae', notice: [2, 26], due: [3, 23], dueLabel: '起案の合議期限', due2: [3, 31], due2Label: '退職者の書類の期限',
+      points: ['4/1付け任用（再度の任用を含む）は、記載例・任用予定者一覧を参考に起案して総務課へ合議', '起案日は当初予算の議決後の日付。添付は辞令書・勤務条件通知書のみ（履歴書等は不要）', '3/31付け退職者は、資格確認証（マイナ保険証未取得の場合）・タイムカード・名札ケースを提出'],
+      tracker: { type: 'kian', label: '合議', step: 'kaito' },
+      tracker2: { type: 'retire', label: '退職者の書類', step: 'taishoku', items: ['資格確認証', 'タイムカード', '名札ケース'] },
+      steps: [
+        { key: 'kisairei', label: '任用起案の記載例を作成', at: ['notice', -5] },
+        { key: 'yotei', label: '任用予定者一覧を作成（「任用一覧」をExcelに書き出し）', at: ['notice', -3], tab: 'appoint' },
+        ...KESSAI('記載例を添付'),
+        { key: 'soufu', label: '任用予定者一覧を各課へ送付', at: ['notice', 1] },
+        { key: 'kaito', label: '任用起案の合議の受付（起案日が議決後か・添付が辞令書と勤務条件通知書のみか確認）', at: ['due', 0] },
+        { key: 'taishoku', label: '3/31退職者の書類の受付（資格確認証・タイムカード・名札ケース）', at: ['due2', 0], tab: 'retire' },
+      ] },
+  ];
+  function yearEndNoticeDates(targetFy, n) {
     return {
-      notice: t.notice ? yearEndDate(targetFy, t.notice, 'before') : '',
-      start: t.start ? yearEndDate(targetFy, t.start, t.startDir || 'before') : '',
-      due: !t.due ? '' : t.dueDir === 'none' ? toISO(new Date(t.due[0] >= 5 ? targetFy - 1 : targetFy, t.due[0] - 1, t.due[1])) : yearEndDate(targetFy, t.due, 'before'),
+      notice: yearEndDate(targetFy, n.notice, 'before'),
+      due: yearEndDate(targetFy, n.due, 'before'),
+      due2: n.due2 ? yearEndDate(targetFy, n.due2, 'before') : '',
     };
   }
-  /**
-   * 対象年度（4/1任用の年度）のチェックリストがなければ作る。ひな形に増えた項目も足す。
-   * 作った・足したときは true
-   */
+  /** 手順の目安日（通知日・期限からの日数。閉庁日は避ける） */
+  function yearEndStepDate(targetFy, step, dates) {
+    const [base, v, dir] = step.at;
+    if (base === 'md') return yearEndDate(targetFy, v, dir || 'before');
+    const from = dates[base];
+    if (!from) return '';
+    return toBusinessDay(addDaysISO(from, v), v > 0 ? 'after' : 'before');
+  }
+  /** 対象年度（4/1任用の年度）のチェックリストがなければ作る。作ったら true */
   function ensureYearEnd(data, targetFy) {
     if (!data.yearEnd || typeof data.yearEnd !== 'object') data.yearEnd = {};
     let list = data.yearEnd[targetFy];
     let changed = false;
-    if (!list) {
-      list = data.yearEnd[targetFy] = { createdAt: toISO(new Date()), budgetDate: '', items: [] };
+    if (!list || list.version !== 2) {
+      list = data.yearEnd[targetFy] = { version: 2, createdAt: toISO(new Date()), budgetDate: '', notices: {} };
       changed = true;
     }
-    for (const t of YEAR_END_TEMPLATE) {
-      if (list.items.some((it) => it.key === t.key)) continue;
-      list.items.push({ key: t.key, ...yearEndDates(targetFy, t), done: false, doneAt: '', checks: {}, memo: '' });
+    for (const n of YEAR_END_NOTICES) {
+      if (list.notices[n.key]) continue;
+      list.notices[n.key] = { dates: yearEndNoticeDates(targetFy, n), steps: {}, responses: {}, retire: {}, memo: '' };
       changed = true;
     }
     return changed;
   }
-  /** 表示用：ひな形の文言と保存した進み具合を合わせ、期日順に並べる */
-  function yearEndItems(data, targetFy) {
+  /** 回答を受け付ける相手（課・職員）。保存済みの相手も残す */
+  function yearEndTargets(data, fy, type, settings, saved) {
+    const latest = latestAppointmentsOfFy(data, fy);
+    const depts = (list) => [...new Set(list.map((a) => a.dept).filter(Boolean))];
+    let keys = [];
+    if (type === 'all') keys = depts(latest);
+    else if (type === 'wishMissing') keys = depts(latest.filter((a) => { const ev = evaluationFor(data, a.staffId, fy); return !ev || !ev.wish; }));
+    else if (type === 'recruit') {
+      const dec = data.recruitDecisions || {};
+      keys = depts([
+        ...recruitNeeds(data, fy, settings).filter((x) => ((dec[`${fy + 1}:${x.appt.id}`] || {}).decision || 'public') === 'public').map((x) => x.appt),
+        ...data.recruitPositions.filter((r) => Number(r.fy) === fy + 1 && (r.decision || 'public') === 'public'),
+      ]);
+    } else if (type === 'reappoint') {
+      keys = depts([
+        ...data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === fy + 1 && a.recruitMethod === 'reappoint'),
+        ...latest.filter((a) => continuationStatus(data, a, settings).code === 'stay_expected'),
+      ]);
+    } else if (type === 'kian') {
+      keys = depts(data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === fy + 1));
+    } else if (type === 'retire') {
+      const out = latest.filter((a) => a.end === fiscalYearEnd(fy) && ['leave', 'leave_expected', 'public'].includes(continuationStatus(data, a, settings).code))
+        .map((a) => {
+          const s = data.staff.find((x) => x.id === a.staffId) || {};
+          return { key: a.staffId, label: s.name || '', sub: a.dept || '' };
+        });
+      for (const k of Object.keys(saved || {})) {
+        if (!out.some((x) => x.key === k)) out.push({ key: k, label: (saved[k] && saved[k].label) || '', sub: (saved[k] && saved[k].sub) || '' });
+      }
+      return out;
+    }
+    for (const k of Object.keys(saved || {})) if (!keys.includes(k)) keys.push(k);
+    return keys.map((k) => ({ key: k, label: k }));
+  }
+  /** 状態：done / overdue / soon（7日以内）/ later */
+  function yearEndState(date, done, today) {
+    if (done) return 'done';
+    if (!date) return 'later';
+    if (date < today) return 'overdue';
+    if (diffDays(today, date) <= 7) return 'soon';
+    return 'later';
+  }
+  /** 表示用にまとめる（手順の目安日・進み具合・次にやること・回答の状況） */
+  function yearEndView(data, targetFy, today, settings) {
     const list = (data.yearEnd || {})[targetFy];
     if (!list) return [];
-    const order = (it) => it.due || it.start || (it.key === 'yosan' ? (list.budgetDate || yearEndDate(targetFy, [3, 18])) : '9999');
-    return list.items.map((it) => {
-      const t = YEAR_END_TEMPLATE.find((x) => x.key === it.key) || { title: it.title || '', who: it.who || '', checks: [], notes: [], src: '', tab: '' };
-      const checks = t.checks || [];
-      const checked = checks.filter((_, i) => it.checks && it.checks[i]).length;
-      return { ...t, ...it, title: t.title || it.title, source: YEAR_END_SRC[t.src] || '', checks, notes: t.notes || [], checked, sortKey: order(it) };
-    }).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  }
-  /** 期日に対する状態：done / overdue / soon（14日以内）/ later */
-  function yearEndState(it, today) {
-    if (it.done) return 'done';
-    if (!it.due) return 'later';
-    if (it.due < today) return 'overdue';
-    if (diffDays(today, it.due) <= 14) return 'soon';
-    return 'later';
+    const fy = targetFy - 1;
+    return YEAR_END_NOTICES.map((n) => {
+      const rec = list.notices[n.key] || { dates: {}, steps: {}, responses: {}, retire: {} };
+      const steps = n.steps.map((s) => {
+        const date = yearEndStepDate(targetFy, s, rec.dates);
+        const doneAt = rec.steps[s.key] || '';
+        return { ...s, date, doneAt, state: yearEndState(date, !!doneAt, today) };
+      });
+      const tracker = (tr, saved, isRetire) => {
+        if (!tr) return null;
+        const targets = yearEndTargets(data, fy, tr.type, settings, saved);
+        const rows = targets.map((t) => {
+          const r = saved[t.key] || {};
+          const done = isRetire ? tr.items.every((_, i) => r[i]) : r.s === 'done' || r.s === 'na';
+          return { ...t, rec: r, done };
+        });
+        return { ...tr, rows, done: rows.filter((x) => x.done).length, total: rows.length };
+      };
+      const done = steps.filter((s) => s.doneAt).length;
+      const next = steps.find((s) => !s.doneAt) || null;
+      return {
+        key: n.key, title: n.title, source: YEAR_END_SRC[n.src], points: n.points, dueLabel: n.dueLabel, due2Label: n.due2Label || '',
+        dates: rec.dates, memo: rec.memo || '', steps, done, total: steps.length, next,
+        state: next ? next.state : 'done',
+        tracker: tracker(n.tracker, rec.responses || {}, false),
+        tracker2: tracker(n.tracker2, rec.retire || {}, true),
+      };
+    });
   }
 
   const api = {
@@ -1762,7 +1866,7 @@
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
-    YEAR_END_TEMPLATE, YEAR_END_SRC, isClosedDay, toBusinessDay, yearEndDates, ensureYearEnd, yearEndItems, yearEndState,
+    YEAR_END_NOTICES, YEAR_END_SRC, isClosedDay, toBusinessDay, yearEndNoticeDates, yearEndStepDate, ensureYearEnd, yearEndTargets, yearEndView, yearEndState,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
