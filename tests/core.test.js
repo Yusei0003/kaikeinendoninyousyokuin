@@ -732,6 +732,7 @@ test('年度替わり事務：求人確認・予算議決の確認・4月の資�
   assert.strictEqual(v().saido.steps[2].date, '2026-03-18');
   const sk = v().shikaku;
   assert.strictEqual(sk.dates.notice, '2026-04-01');
+  assert.strictEqual(sk.dates.due, '2026-04-03'); // R8.4.5は日曜 → 前の金曜
   assert.deepStrictEqual(sk.tracker.rows.map((r) => [r.key, r.na]), [['s2', [true, true, false]]]); // 社会保険 無 → 共済・厚生年金は対象外
   assert.deepStrictEqual(sk.tracker2.rows.map((r) => [r.key, r.na]), [['s1', [false, false, false, true]]]); // 退手でない → 総合事務組合は対象外
   d.yearEnd[2026].notices.shikaku.hire = { s2: { 2: true } };

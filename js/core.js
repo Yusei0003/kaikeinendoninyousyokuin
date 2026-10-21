@@ -1704,7 +1704,7 @@
       tracker: { type: 'kian', label: '合議', step: 'matome' },
       tracker2: { type: 'retire', label: '退職者の書類', step: 'matome', items: ['資格確認証', 'タイムカード', '名札ケース'] },
       steps: withGiketsu(YE_STEPS('記載例・任用予定者一覧を添付', '任用起案の合議・3/31退職者の書類の受付', '翌年度の任用一覧を確定、退職者の退職を登録', { kakutei: 'appoint' }, ['due2', 0], ['due2', 1]), 1) },
-    { key: 'shikaku', title: '4月の資格取得・喪失手続き', src: 'okuri', kind: 'task', notice: [4, 1], noticeDir: 'none', noticeLabel: '任用開始', due: [4, 10], dueLabel: '期限（目安）',
+    { key: 'shikaku', title: '4月の資格取得・喪失手続き', src: 'okuri', kind: 'task', notice: [4, 1], noticeDir: 'none', noticeLabel: '任用開始', due: [4, 5], dueLabel: '期限',
       points: ['新規採用者の資格取得手続き（共済短期・厚生年金・雇用保険）', '退職者の社会保険等の喪失手続き（共済組合・厚生年金・雇用保険・総合事務組合）', '対象外の欄は、任用の「社会保険」「雇保／退手」の入力（未入力なら週時間からの目安）で決めています'],
       tracker: { type: 'newHire', label: '新規採用者の資格取得', step: 'shutoku', store: 'hire', ins: true, items: ['共済(短期)', '厚生年金', '雇用保険'] },
       tracker2: { type: 'retire', label: '退職者の資格喪失', step: 'soshitsu', store: 'soshitsu', ins: true, items: ['共済組合', '厚生年金', '雇用保険', '総合事務組合'] },
@@ -1735,6 +1735,12 @@
     let changed = false;
     if (!list || list.version !== 3) {
       list = data.yearEnd[targetFy] = { version: 3, createdAt: toISO(new Date()), budgetDate: '', notices: {} };
+      changed = true;
+    }
+    // 4月の手続きの期限を4/10（仮）から4/5に変えたため、仮の日付のままなら直す
+    const sk = list.notices.shikaku;
+    if (sk && sk.dates && sk.dates.due === yearEndDate(targetFy, [4, 10], 'before')) {
+      sk.dates.due = yearEndDate(targetFy, [4, 5], 'before');
       changed = true;
     }
     for (const n of YEAR_END_NOTICES) {
