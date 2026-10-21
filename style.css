@@ -606,3 +606,5 @@ td.center { text-align: center; }
 .ye-notice[hidden] { display: none; }
 #yearend-overview td:nth-child(5) .badge { white-space: nowrap; }
 #yearend-overview td:nth-child(6) { min-width: 200px; }
+.ye-body.ye-body-wide { grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.6fr); }
+@media (max-width: 1000px) { .ye-body.ye-body-wide { grid-template-columns: 1fr; } }

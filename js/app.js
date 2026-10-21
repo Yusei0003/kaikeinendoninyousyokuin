@@ -2176,24 +2176,26 @@ function yeBar(done, total) {
 }
 function yeTrackerHtml(n, tr, which) {
   if (!tr) return '';
-  const isRetire = which === 'retire';
+  const isRetire = !!tr.items;
+  const showIns = !!tr.ins;
   const rows = tr.rows.map((r) => {
     if (isRetire) {
       return `<tr class="${r.done ? 'row-muted' : ''}"><td>${r.key && staffById(r.key) ? nameLink(r.key) : escapeHtml(r.label)}</td><td>${escapeHtml(r.sub || '')}</td>
-        ${tr.items.map((it, i) => `<td class="center"><input type="checkbox" data-ye-ret="${n.key}|${escapeHtml(r.key)}|${i}"${r.rec[i] ? ' checked' : ''} aria-label="${escapeHtml(it)}"></td>`).join('')}
-        <td>${r.done ? '<span class="badge st-ok">そろった</span>' : ''}</td></tr>`;
+        ${showIns ? `<td><small>${escapeHtml((r.ins && r.ins.soc) || '未記入')}／${escapeHtml((r.ins && r.ins.emp) || '未記入')}</small></td>` : ''}
+        ${tr.items.map((it, i) => `<td class="center">${r.na[i] ? '<small class="muted">対象外</small>' : `<input type="checkbox" data-ye-ret="${n.key}|${tr.store}|${escapeHtml(r.key)}|${i}"${r.rec[i] ? ' checked' : ''} aria-label="${escapeHtml(it)}">`}</td>`).join('')}
+        <td>${r.done ? '<span class="badge st-ok">済</span>' : ''}</td></tr>`;
     }
     const seg = Object.entries(RESP_LABEL).map(([v, l]) =>
       `<button class="ye-seg${(r.rec.s || '') === v ? ' on' : ''} ye-seg-${v || 'none'}" data-ye-resp="${n.key}|${escapeHtml(r.key)}|${v}">${l}</button>`).join('');
     return `<tr class="${r.done ? 'row-muted' : ''}"><td>${escapeHtml(r.label)}</td><td><span class="ye-segs">${seg}</span></td><td>${r.rec.at ? yeDate(r.rec.at) : ''}</td></tr>`;
   });
-  const head = isRetire ? ['氏名', '所属', ...tr.items, ''] : ['課', tr.label, '受付日'];
+  const head = isRetire ? ['氏名', '所属', ...(showIns ? ['社保／雇保'] : []), ...tr.items, ''] : ['課', tr.label, '受付日'];
   const left = tr.total - tr.done;
   return `<div class="ye-tracker">
     <div class="ye-tracker-head"><strong>${escapeHtml(tr.label)}の状況</strong> <span class="badge ${left ? 'st-warn' : 'st-ok'}">${tr.done}/${tr.total}${isRetire ? '人' : '課'}</span>
       ${!isRetire && left ? `<button class="btn-small" data-ye-remind="${n.key}">${tr.label}が未の課を一覧で出す（督促用）</button>` : ''}
       ${!isRetire ? `<button class="btn-small" data-ye-adddept="${n.key}">課を追加</button>` : ''}</div>
-    ${tableHtml(head, rows, isRetire ? '3月31日で任期満了・退職となる職員はいません（「退職・残留」の入力から挙がります）。' : '対象の課がありません（任用・意向・公募職種の入力から自動で挙がります。「課を追加」でも追加できます）。')}
+    ${tableHtml(head, rows, isRetire ? (tr.type === 'newHire' ? '4月1日の新規採用者（3月31日まで任用のなかった職員）はいません（翌年度の任用の登録から挙がります）。' : '3月31日で任期満了・退職となる職員はいません（「退職・残留」の入力から挙がります）。') : '対象の課がありません（任用・意向・公募職種の入力から自動で挙がります。「課を追加」でも追加できます）。')}
   </div>`;
 }
 function renderYearEnd() {
@@ -2242,7 +2244,7 @@ function renderYearEnd() {
     const steps = n.steps.map((s, i) => `<li class="ye-step ye-s-${s.state}${n.next && n.next.key === s.key ? ' ye-next' : ''}">
         <label><input type="checkbox" data-ye-step="${n.key}|${s.key}"${s.doneAt ? ' checked' : ''}>
         <span class="ye-step-no">${i + 1}</span><span class="ye-step-label">${escapeHtml(s.label)}</span></label>
-        <span class="ye-step-date">${s.doneAt ? `<span class="ok-text">✓ ${yeDate(s.doneAt)} 済</span>` : `${yeDate(s.date)}まで${s.state === 'overdue' ? ' <span class="badge st-err">遅れ</span>' : s.state === 'soon' ? ' <span class="badge st-warn">7日以内</span>' : ''}`}</span>
+        <span class="ye-step-date">${s.doneAt ? `<span class="ok-text">✓ ${yeDate(s.doneAt)} 済</span>` : `${s.date ? `${yeDate(s.date)}まで` : s.key === 'giketsu' ? '議決日 未入力' : '日付未定'}${s.state === 'overdue' ? ' <span class="badge st-err">遅れ</span>' : s.state === 'soon' ? ' <span class="badge st-warn">7日以内</span>' : ''}`}</span>
         ${n.next && n.next.key === s.key ? '<span class="badge st-info">次にやること</span>' : ''}
         ${s.tab ? `<button class="btn-small" data-goto="${s.tab}">${TAB_LABEL[s.tab]}を開く</button>` : ''}</li>`).join('');
     return `<div class="ye-notice ye-n-${n.state}" id="ye-${n.key}"${yeOpen && yeOpen !== n.key ? ' hidden' : ''}>
@@ -2251,12 +2253,12 @@ function renderYearEnd() {
         <span class="ye-prog">${yeBar(n.done, n.total)} <small>作業 ${n.done}/${n.total}</small></span>
       </div>
       <div class="ye-dates">
-        <label>通知日 <input type="date" data-ye-date="${n.key}|notice" value="${escapeHtml(n.dates.notice || '')}"></label>
+        <label>${escapeHtml(n.noticeLabel)} <input type="date" data-ye-date="${n.key}|notice" value="${escapeHtml(n.dates.notice || '')}"></label>
         <label>${escapeHtml(n.dueLabel)} <input type="date" data-ye-date="${n.key}|due" value="${escapeHtml(n.dates.due || '')}"></label>
         ${n.due2Label ? `<label>${escapeHtml(n.due2Label)} <input type="date" data-ye-date="${n.key}|due2" value="${escapeHtml(n.dates.due2 || '')}"></label>` : ''}
       </div>
       <details class="ye-points"><summary>通知の主な内容</summary><ul>${n.points.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul><div class="ye-src">出典：${escapeHtml(n.source)}</div></details>
-      <div class="ye-body">
+      <div class="ye-body${[n.tracker, n.tracker2].some((tr) => tr && tr.ins) ? ' ye-body-wide' : ''}">
         <ol class="ye-steps">${steps}</ol>
         <div class="ye-trackers">${yeTrackerHtml(n, n.tracker, 'resp')}${yeTrackerHtml(n, n.tracker2, 'retire')}</div>
       </div>
@@ -2273,7 +2275,16 @@ function renderYearEnd() {
     document.getElementById(`ye-${yeOpen}`).scrollIntoView({ behavior: 'smooth', block: 'start' });
   }));
   document.getElementById('yearend-showall').onclick = () => { yeOpen = null; renderYearEnd(); };
-  document.getElementById('ye-budget').onchange = (e) => { list.budgetDate = e.target.value; saveData(); };
+  // 議決日を入れたら「予算議決の確認」を済にする
+  document.getElementById('ye-budget').onchange = (e) => {
+    list.budgetDate = e.target.value;
+    for (const n of C.YEAR_END_NOTICES) {
+      if (!n.steps.some((x) => x.key === 'giketsu')) continue;
+      const r = list.notices[n.key];
+      if (e.target.value) { if (!r.steps.giketsu) r.steps.giketsu = e.target.value; } else r.steps.giketsu = '';
+    }
+    saveData();
+  };
   root.querySelectorAll('[data-ye-step]').forEach((el) => (el.onchange = () => {
     const [k, s] = el.dataset.yeStep.split('|');
     rec(k).steps[s] = el.checked ? t : '';
@@ -2289,7 +2300,10 @@ function renderYearEnd() {
   const autoStep = (key) => {
     const n = C.yearEndView(DATA, target, t, DATA.settings).find((x) => x.key === key);
     const trs = [n.tracker, n.tracker2].filter(Boolean);
-    if (trs.length && trs.every((tr) => tr.total && tr.done === tr.total) && !rec(key).steps.matome) rec(key).steps.matome = t;
+    for (const step of new Set(trs.map((tr) => tr.step))) {
+      const mine = trs.filter((tr) => tr.step === step);
+      if (mine.every((tr) => tr.total && tr.done === tr.total) && !rec(key).steps[step]) rec(key).steps[step] = t;
+    }
   };
   root.querySelectorAll('[data-ye-resp]').forEach((el) => (el.onclick = () => {
     const [k, dept, v] = el.dataset.yeResp.split('|');
@@ -2298,10 +2312,11 @@ function renderYearEnd() {
     saveData();
   }));
   root.querySelectorAll('[data-ye-ret]').forEach((el) => (el.onchange = () => {
-    const [k, sid, i] = el.dataset.yeRet.split('|');
+    const [k, store, sid, i] = el.dataset.yeRet.split('|');
     const s = staffById(sid);
-    const a = DATA.appointments.find((x) => x.staffId === sid && x.start && C.fiscalYearOf(x.start) === fy);
-    const r = rec(k).retire[sid] = { label: s ? s.name : '', sub: a ? a.dept : '', ...(rec(k).retire[sid] || {}) };
+    const a = DATA.appointments.find((x) => x.staffId === sid && x.start && C.fiscalYearOf(x.start) === (store === 'hire' ? target : fy));
+    if (!rec(k)[store]) rec(k)[store] = {};
+    const r = rec(k)[store][sid] = { label: s ? s.name : '', sub: a ? a.dept : '', ...(rec(k)[store][sid] || {}) };
     r[i] = el.checked;
     autoStep(k);
     saveData();
@@ -2340,8 +2355,11 @@ function exportYearEnd() {
   const resp = [['通知', '相手', '状況', '受付日']];
   for (const n of view) {
     n.steps.forEach((s) => rows.push([n.title, s.label, yeDate(s.date), YE_STATE[s.state][0], yeDate(s.doneAt)]));
-    if (n.tracker) n.tracker.rows.forEach((r) => resp.push([n.title, r.label, RESP_LABEL[r.rec.s || ''], yeDate(r.rec.at)]));
-    if (n.tracker2) n.tracker2.rows.forEach((r) => resp.push([n.title, `${r.label}（${r.sub}）`, n.tracker2.items.map((it, i) => `${r.rec[i] ? '☑' : '☐'}${it}`).join(' '), '']));
+    for (const tr of [n.tracker, n.tracker2].filter(Boolean)) {
+      tr.rows.forEach((r) => resp.push(tr.items
+        ? [`${n.title}：${tr.label}`, `${r.label}（${r.sub}）`, tr.items.map((it, i) => `${r.na[i] ? '－' : r.rec[i] ? '☑' : '☐'}${it}`).join(' '), '']
+        : [`${n.title}：${tr.label}`, r.label, RESP_LABEL[r.rec.s || ''], yeDate(r.rec.at)]));
+    }
   }
   writeWorkbook(`${C.fyLabel(target)}任用_年度替わり事務_${stamp()}.xlsx`, [{ name: '作業', rows }, { name: '回答の状況', rows: resp }]);
 }

@@ -1659,6 +1659,7 @@
     boshu: '会計年度任用職員の募集方法について（R8.1.8 総務課長通知）',
     saido: '任用に係る会計年度任用職員の再度の任用について（R8.1.8 総務課長通知）',
     senko: '会計年度任用職員の選考方法について（R8.1.26 総務課長通知）',
+    okuri: '申送事項（総務課職員係）年間スケジュール 4月',
     kirikae: '年度切替に伴う会計年度任用職員の任用及び退職に係る事務手続きについて（R8.2.26 総務課長通知）',
   };
   /**
@@ -1673,6 +1674,8 @@
     { key: 'matome', label: `取りまとめ（${matome}）`, at: matomeAt, tab: tabs.matome },
     { key: 'kakutei', label: `データ確定（${kakutei}）`, at: kakuteiAt, tab: tabs.kakutei },
   ];
+  /** 予算議決の確認を pos 番目に入れる（任用の起案日・特定財源の職員への通知は議決後） */
+  const withGiketsu = (steps, pos) => [...steps.slice(0, pos), { key: 'giketsu', label: '予算議決の確認（議決日を画面上部に入力）', at: ['budget', 0] }, ...steps.slice(pos)];
   const YEAR_END_NOTICES = [
     { key: 'kibo', title: '任用希望調査', src: 'kibo', notice: [11, 5], due: [11, 21], dueLabel: '回答期限',
       points: ['翌年度に新たに任用を希望する職（職務内容等）と、今年度で廃止する事業の職員を「任用希望調査シート」で報告してもらう', '引き続き任用する職員（4会計年度目以降の公募を含む）は報告不要', 'グループウェアのメッセージで職員係へ送信'],
@@ -1684,12 +1687,14 @@
       steps: YE_STEPS('別紙：希望の有無が未確認の職員一覧', '提出の受付・未提出の課へ督促', '本人の希望を「年目・任用意向」に入力し、再度の任用の対象者を確定', { kakutei: 'intent' }) },
     { key: 'boshu', title: '募集方法（募集職種一覧）', src: 'boshu', notice: [1, 8], due: [1, 16], dueLabel: '修正の提出期限',
       points: ['選考スケジュール：募集 1/22〜1/30、選考 2/2〜2/20、合否通知・結果報告 2/27', '募集はハローワークインターネットサービスへの求人申込み', '募集職種一覧に加筆修正があれば朱書き訂正して提出してもらう', '募集人数に達した場合は受付期間内でも締め切ってよい'],
-      tracker: { type: 'recruit', label: '確認', step: 'matome' },
-      steps: YE_STEPS('募集職種一覧・募集案内を添付', '募集職種一覧の修正の受付', '募集職種一覧を確定', { kakutei: 'recruit' }, ['due', 0], ['due', 2]) },
+      steps: [
+        { key: 'tsuchi', label: '通知（募集職種一覧・募集案内を添付）', at: ['notice', 0] },
+        { key: 'kyujin', label: '求人確認（ハローワークインターネットサービスへの求人申込み・内容の確認。募集開始の前日まで）', at: ['md', [1, 21], 'before'], tab: 'recruit' },
+      ] },
     { key: 'saido', title: '再度の任用（本人への通知）', src: 'saido', notice: [1, 8], due: [3, 19], dueLabel: '本人通知の期限',
       points: ['各課から現職員へ、様式1（行う）・様式2（行わない）・様式3（対象外：3会計年度目）で通知してもらう', '予算の議決までは再度の任用となる見込みとして扱う', '特定財源で人件費を措置している職員は、予算の議決後に通知', '総務課合議は不要。対象者一覧に修正があれば連絡してもらう'],
       tracker: { type: 'reappoint', label: '本人通知', step: 'matome' },
-      steps: YE_STEPS('対象者一覧・様式1〜3を添付', '対象者一覧の修正連絡の受付・各課の本人通知の完了確認', '「再度の任用」で翌年度の任用を登録', { kakutei: 'reappoint' }) },
+      steps: withGiketsu(YE_STEPS('対象者一覧・様式1〜3を添付', '対象者一覧の修正連絡の受付・各課の本人通知の完了確認', '「再度の任用」で翌年度の任用を登録', { kakutei: 'reappoint' }), 2) },
     { key: 'senko', title: '選考方法・選考結果報告', src: 'senko', notice: [1, 26], due: [2, 27], dueLabel: '結果報告の期限',
       points: ['書類審査（書類審査採点表）又は面接審査（面接評定表）。どちらにするかは各課が判断', '面接の日程は各課が申込者と調整。併願者は担当課間で調整（紹介状は併願数分）', '結果報告に添付：応募者一覧表、採点表又は評定表、応募者全員の応募申込書・職務等経歴書（必要に応じて資格証の写し）'],
       tracker: { type: 'recruit', label: '結果報告', step: 'matome' },
@@ -1698,11 +1703,19 @@
       points: ['4/1付け任用（再度の任用を含む）は、記載例・任用予定者一覧を参考に起案して総務課へ合議', '起案日は当初予算の議決後の日付。添付は辞令書・勤務条件通知書のみ（履歴書等は不要）', '3/31付け退職者は、資格確認証（マイナ保険証未取得の場合）・タイムカード・名札ケースを提出'],
       tracker: { type: 'kian', label: '合議', step: 'matome' },
       tracker2: { type: 'retire', label: '退職者の書類', step: 'matome', items: ['資格確認証', 'タイムカード', '名札ケース'] },
-      steps: YE_STEPS('記載例・任用予定者一覧を添付', '任用起案の合議・3/31退職者の書類の受付', '翌年度の任用一覧を確定、退職者の退職を登録', { kakutei: 'appoint' }, ['due2', 0], ['due2', 1]) },
+      steps: withGiketsu(YE_STEPS('記載例・任用予定者一覧を添付', '任用起案の合議・3/31退職者の書類の受付', '翌年度の任用一覧を確定、退職者の退職を登録', { kakutei: 'appoint' }, ['due2', 0], ['due2', 1]), 1) },
+    { key: 'shikaku', title: '4月の資格取得・喪失手続き', src: 'okuri', kind: 'task', notice: [4, 1], noticeDir: 'none', noticeLabel: '任用開始', due: [4, 10], dueLabel: '期限（目安）',
+      points: ['新規採用者の資格取得手続き（共済短期・厚生年金・雇用保険）', '退職者の社会保険等の喪失手続き（共済組合・厚生年金・雇用保険・総合事務組合）', '対象外の欄は、任用の「社会保険」「雇保／退手」の入力（未入力なら週時間からの目安）で決めています'],
+      tracker: { type: 'newHire', label: '新規採用者の資格取得', step: 'shutoku', store: 'hire', ins: true, items: ['共済(短期)', '厚生年金', '雇用保険'] },
+      tracker2: { type: 'retire', label: '退職者の資格喪失', step: 'soshitsu', store: 'soshitsu', ins: true, items: ['共済組合', '厚生年金', '雇用保険', '総合事務組合'] },
+      steps: [
+        { key: 'shutoku', label: '新規採用者の資格取得手続き（共済短期・厚生年金・雇用保険）', at: ['due', 0], tab: 'appoint' },
+        { key: 'soshitsu', label: '退職者の資格喪失手続き（共済組合・厚生年金・雇用保険・総合事務組合）', at: ['due', 0], tab: 'retire' },
+      ] },
   ];
   function yearEndNoticeDates(targetFy, n) {
     return {
-      notice: yearEndDate(targetFy, n.notice, 'before'),
+      notice: n.noticeDir === 'none' ? toISO(new Date(targetFy, n.notice[0] - 1, n.notice[1])) : yearEndDate(targetFy, n.notice, 'before'),
       due: yearEndDate(targetFy, n.due, 'before'),
       due2: n.due2 ? yearEndDate(targetFy, n.due2, 'before') : '',
     };
@@ -1731,6 +1744,23 @@
     }
     return changed;
   }
+  /** 任用の社会保険・雇保／退手（未入力なら目安） */
+  function insuranceOf(data, a, settings) {
+    const soc = a.socialIns || ((suggestSocialIns(data, a, settings) || {}).value) || '';
+    const emp = a.empIns || ((suggestEmpIns(data, a, settings) || {}).value) || '';
+    return { soc, emp };
+  }
+  /**
+   * 資格取得・喪失の欄が対象外か。社会保険「無」→共済・厚生年金は対象外、
+   * 雇用保険でない→雇用保険は対象外、退手でない→総合事務組合は対象外。未入力は対象として残す。
+   */
+  function insuranceNa(item, ins) {
+    if (!ins) return false;
+    if (/共済|厚生年金/.test(item)) return ins.soc === '無';
+    if (item === '雇用保険') return ins.emp === '無' || ins.emp === '退手';
+    if (item === '総合事務組合') return ins.emp !== '' && ins.emp !== '退手';
+    return false;
+  }
   /** 回答を受け付ける相手（課・職員）。保存済みの相手も残す */
   function yearEndTargets(data, fy, type, settings, saved) {
     const latest = latestAppointmentsOfFy(data, fy);
@@ -1751,12 +1781,15 @@
       ]);
     } else if (type === 'kian') {
       keys = depts(data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === fy + 1));
-    } else if (type === 'retire') {
-      const out = latest.filter((a) => a.end === fiscalYearEnd(fy) && ['leave', 'leave_expected', 'public'].includes(continuationStatus(data, a, settings).code))
-        .map((a) => {
-          const s = data.staff.find((x) => x.id === a.staffId) || {};
-          return { key: a.staffId, label: s.name || '', sub: a.dept || '' };
-        });
+    } else if (type === 'retire' || type === 'newHire') {
+      const list = type === 'retire'
+        ? latest.filter((a) => a.end === fiscalYearEnd(fy) && ['leave', 'leave_expected', 'public'].includes(continuationStatus(data, a, settings).code))
+        : data.appointments.filter((a) => a.status !== 'canceled' && a.start === fiscalYearStart(fy + 1)
+          && !data.appointments.some((b) => b.staffId === a.staffId && b.status !== 'canceled' && b.end === fiscalYearEnd(fy)));
+      const out = list.map((a) => {
+        const s = data.staff.find((x) => x.id === a.staffId) || {};
+        return { key: a.staffId, label: s.name || '', sub: a.dept || '', ins: insuranceOf(data, a, settings) };
+      });
       for (const k of Object.keys(saved || {})) {
         if (!out.some((x) => x.key === k)) out.push({ key: k, label: (saved[k] && saved[k].label) || '', sub: (saved[k] && saved[k].sub) || '' });
       }
@@ -1780,29 +1813,34 @@
     const fy = targetFy - 1;
     return YEAR_END_NOTICES.map((n) => {
       const rec = list.notices[n.key] || { dates: {}, steps: {}, responses: {}, retire: {} };
+      const dates = { ...rec.dates, budget: list.budgetDate || '' };
       const steps = n.steps.map((s) => {
-        const date = yearEndStepDate(targetFy, s, rec.dates);
+        const date = yearEndStepDate(targetFy, s, dates);
         const doneAt = rec.steps[s.key] || '';
         return { ...s, date, doneAt, state: yearEndState(date, !!doneAt, today) };
       });
-      const tracker = (tr, saved, isRetire) => {
+      const tracker = (tr) => {
         if (!tr) return null;
+        const store = tr.store || (tr.items ? 'retire' : 'responses');
+        const saved = rec[store] || {};
         const targets = yearEndTargets(data, fy, tr.type, settings, saved);
         const rows = targets.map((t) => {
           const r = saved[t.key] || {};
-          const done = isRetire ? tr.items.every((_, i) => r[i]) : r.s === 'done' || r.s === 'na';
-          return { ...t, rec: r, done };
+          const na = tr.items ? tr.items.map((it) => (tr.ins ? insuranceNa(it, t.ins) : false)) : [];
+          const done = tr.items ? tr.items.every((_, i) => na[i] || r[i]) : r.s === 'done' || r.s === 'na';
+          return { ...t, rec: r, na, done };
         });
-        return { ...tr, rows, done: rows.filter((x) => x.done).length, total: rows.length };
+        return { ...tr, store, rows, done: rows.filter((x) => x.done).length, total: rows.length };
       };
       const done = steps.filter((s) => s.doneAt).length;
       const next = steps.find((s) => !s.doneAt) || null;
       return {
         key: n.key, title: n.title, source: YEAR_END_SRC[n.src], points: n.points, dueLabel: n.dueLabel, due2Label: n.due2Label || '',
-        dates: rec.dates, memo: rec.memo || '', steps, done, total: steps.length, next,
+        dates, memo: rec.memo || '', steps, done, total: steps.length, next,
         state: next ? next.state : 'done',
-        tracker: tracker(n.tracker, rec.responses || {}, false),
-        tracker2: tracker(n.tracker2, rec.retire || {}, true),
+        noticeLabel: n.noticeLabel || '通知日',
+        tracker: tracker(n.tracker),
+        tracker2: tracker(n.tracker2),
       };
     });
   }
@@ -1823,7 +1861,7 @@
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
-    YEAR_END_NOTICES, YEAR_END_SRC, isClosedDay, toBusinessDay, yearEndNoticeDates, yearEndStepDate, ensureYearEnd, yearEndTargets, yearEndView, yearEndState,
+    YEAR_END_NOTICES, YEAR_END_SRC, insuranceNa, isClosedDay, toBusinessDay, yearEndNoticeDates, yearEndStepDate, ensureYearEnd, yearEndTargets, yearEndView, yearEndState,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

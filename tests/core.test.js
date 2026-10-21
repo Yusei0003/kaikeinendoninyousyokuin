@@ -681,8 +681,7 @@ test('年度替わり事務：令和8年度任用は通知どおりの日程、�
     ['2026-01-08', '2026-03-19'], ['2026-01-26', '2026-02-27'], ['2026-02-26', '2026-03-23']]);
   assert.strictEqual(r8.kirikae.dates.due2, '2026-03-31');
   const step = (n, k) => n.steps.find((s) => s.key === k);
-  assert.deepStrictEqual(r8.boshu.steps.map((x) => [x.key, x.date]), [['tsuchi', '2026-01-08'], ['matome', '2026-01-16'], ['kakutei', '2026-01-19']]);
-  assert.deepStrictEqual(r8.kirikae.steps.map((x) => x.date), ['2026-02-26', '2026-03-31', '2026-04-01']);
+  assert.deepStrictEqual(r8.kirikae.steps.map((x) => x.date), ['2026-02-26', '', '2026-03-31', '2026-04-01']); // 議決日は未入力
   assert.strictEqual(r8.kibo.state, 'overdue');
   assert.strictEqual(r8.kibo.next.key, 'tsuchi');
   // 作業を済にすると次にやることが進む
@@ -715,4 +714,26 @@ test('年度替わり事務：回答を受け付ける課を任用・意向か�
   d.yearEnd[2026].notices.kibo.responses['企画課'] = { s: '', at: '' }; // 手で追加した課
   const k = C.yearEndView(d, 2026, '2025-11-01', d.settings)[0].tracker;
   assert.deepStrictEqual([k.done, k.total], [1, 2]);
+});
+
+test('年度替わり事務：求人確認・予算議決の確認・4月の資格取得・喪失手続き', () => {
+  const d = baseData();
+  // 3/31で退職する職員（雇用保険）と、4/1の新規採用者（社会保険 無）
+  d.appointments.push(appt({ id: 'r1', start: '2025-04-01', end: '2026-03-31', dept: '総務課', retireType: 'expiry', socialIns: '共済(短期)', empIns: '雇用保険' }));
+  d.staff.push({ id: 's2', name: '架空　新人' });
+  d.appointments.push(appt({ id: 'n1', staffId: 's2', start: '2026-04-01', end: '2027-03-31', dept: '福祉課', socialIns: '無', empIns: '雇用保険' }));
+  C.ensureYearEnd(d, 2026);
+  const v = () => Object.fromEntries(C.yearEndView(d, 2026, '2026-02-10', d.settings).map((x) => [x.key, x]));
+  assert.deepStrictEqual(v().boshu.steps.map((x) => [x.key, x.date]), [['tsuchi', '2026-01-08'], ['kyujin', '2026-01-21']]);
+  assert.strictEqual(v().boshu.tracker, null);
+  assert.deepStrictEqual(v().saido.steps.map((x) => x.key), ['tsuchi', 'matome', 'giketsu', 'kakutei']);
+  assert.deepStrictEqual(v().kirikae.steps.map((x) => x.key), ['tsuchi', 'giketsu', 'matome', 'kakutei']);
+  d.yearEnd[2026].budgetDate = '2026-03-18';
+  assert.strictEqual(v().saido.steps[2].date, '2026-03-18');
+  const sk = v().shikaku;
+  assert.strictEqual(sk.dates.notice, '2026-04-01');
+  assert.deepStrictEqual(sk.tracker.rows.map((r) => [r.key, r.na]), [['s2', [true, true, false]]]); // 社会保険 無 → 共済・厚生年金は対象外
+  assert.deepStrictEqual(sk.tracker2.rows.map((r) => [r.key, r.na]), [['s1', [false, false, false, true]]]); // 退手でない → 総合事務組合は対象外
+  d.yearEnd[2026].notices.shikaku.hire = { s2: { 2: true } };
+  assert.strictEqual(v().shikaku.tracker.done, 1);
 });
