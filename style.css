@@ -604,3 +604,5 @@ td.center { text-align: center; }
 .ye-memo { font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; max-width: 640px; }
 .ye-remind { width: 100%; font-size: 13px; }
 .ye-notice[hidden] { display: none; }
+#yearend-overview td:nth-child(5) .badge { white-space: nowrap; }
+#yearend-overview td:nth-child(6) { min-width: 200px; }

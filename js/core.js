@@ -1667,81 +1667,38 @@
    * steps[].at：['notice'|'due'|'due2', ずらす日数] または ['md', [月,日], 'before'|'after']
    * tracker：回答の受付状況を記録する相手（課・職員）の種類
    */
-  const KESSAI = (n) => [
-    { key: 'kessai', label: '起案・決裁', at: ['notice', -2] },
-    { key: 'hassin', label: `関係部課等の長へ通知（${n}）`, at: ['notice', 0] },
+  /** 通知 → 取りまとめ → データ確定 の3工程 */
+  const YE_STEPS = (notice, matome, kakutei, tabs = {}, matomeAt = ['due', 0], kakuteiAt = ['due', 7]) => [
+    { key: 'tsuchi', label: `通知（${notice}）`, at: ['notice', 0] },
+    { key: 'matome', label: `取りまとめ（${matome}）`, at: matomeAt, tab: tabs.matome },
+    { key: 'kakutei', label: `データ確定（${kakutei}）`, at: kakuteiAt, tab: tabs.kakutei },
   ];
   const YEAR_END_NOTICES = [
     { key: 'kibo', title: '任用希望調査', src: 'kibo', notice: [11, 5], due: [11, 21], dueLabel: '回答期限',
       points: ['翌年度に新たに任用を希望する職（職務内容等）と、今年度で廃止する事業の職員を「任用希望調査シート」で報告してもらう', '引き続き任用する職員（4会計年度目以降の公募を含む）は報告不要', 'グループウェアのメッセージで職員係へ送信'],
-      tracker: { type: 'all', label: '回答', step: 'kaito' },
-      steps: [
-        { key: 'sakusei', label: '通知文・「任用希望調査シート」を作成', at: ['notice', -7] },
-        ...KESSAI('回答期限・送信先を明記'),
-        { key: 'kaito', label: '回答の受付（グループウェアのメッセージ）', at: ['due', 0] },
-        { key: 'tokusoku', label: '未回答の課へ督促', at: ['due', 1] },
-        { key: 'kikitori', label: '必要に応じて職員の必要性を聞き取り', at: ['due', 5] },
-        { key: 'matome', label: '取りまとめ：新規・増員の職を「公募職種」に入力、廃止事業の職員を確認', at: ['due', 7], tab: 'recruit' },
-      ] },
+      tracker: { type: 'all', label: '回答', step: 'matome' },
+      steps: YE_STEPS('任用希望調査シートを添付', '回答の受付・未回答の課へ督促', '新規・増員の職を「公募職種」に入力、廃止事業の職員を確認', { kakutei: 'recruit' }) },
     { key: 'kakunin', title: '再度の任用に係る確認', src: 'kakunin', notice: [11, 28], due: [12, 8], dueLabel: '提出期限',
       points: ['人事評価面談の結果で、再度の任用の希望の有無が確認できなかった職員について、各課に本人へ確認してもらう', '任用開始から3会計年度目の職員は人事評価の結果による再度の任用の対象外（翌年度も任用するなら公募。再度の応募は可）'],
-      tracker: { type: 'wishMissing', label: '提出', step: 'kaito' },
-      steps: [
-        { key: 'chushutsu', label: '人事評価面談の結果から、希望の有無が未確認の職員を抽出（「年目・任用意向」の「希望 未確認」）', at: ['notice', -5], tab: 'intent' },
-        { key: 'ichiran', label: '別紙「対象職員一覧」を作成', at: ['notice', -3] },
-        ...KESSAI('別紙一覧を添付'),
-        { key: 'kaito', label: '提出の受付', at: ['due', 0] },
-        { key: 'tokusoku', label: '未提出の課へ督促', at: ['due', 1] },
-        { key: 'nyuryoku', label: '回答を「年目・任用意向」に入力（本人の希望）', at: ['due', 3], tab: 'intent' },
-        { key: 'matome', label: '取りまとめ：再度の任用の対象者・公募となる職を確定', at: ['due', 10], tab: 'reappoint' },
-      ] },
+      tracker: { type: 'wishMissing', label: '提出', step: 'matome' },
+      steps: YE_STEPS('別紙：希望の有無が未確認の職員一覧', '提出の受付・未提出の課へ督促', '本人の希望を「年目・任用意向」に入力し、再度の任用の対象者を確定', { kakutei: 'intent' }) },
     { key: 'boshu', title: '募集方法（募集職種一覧）', src: 'boshu', notice: [1, 8], due: [1, 16], dueLabel: '修正の提出期限',
       points: ['選考スケジュール：募集 1/22〜1/30、選考 2/2〜2/20、合否通知・結果報告 2/27', '募集はハローワークインターネットサービスへの求人申込み', '募集職種一覧に加筆修正があれば朱書き訂正して提出してもらう', '募集人数に達した場合は受付期間内でも締め切ってよい'],
-      tracker: { type: 'recruit', label: '確認', step: 'kaito' },
-      steps: [
-        { key: 'ichiran', label: '「募集職種一覧」を作成（「公募職種」のまとめから）', at: ['notice', -10], tab: 'recruit' },
-        { key: 'annai', label: '「会計年度任用職員の募集について」（募集案内）を作成', at: ['notice', -7] },
-        ...KESSAI('募集職種一覧・募集案内を添付'),
-        { key: 'kaito', label: '募集職種一覧の修正（朱書き）の受付', at: ['due', 0] },
-        { key: 'kakutei', label: '募集職種一覧を確定', at: ['due', 2] },
-        { key: 'hw', label: 'ハローワークインターネットサービスへ求人申込み', at: ['md', [1, 21], 'before'] },
-        { key: 'kaishi', label: '募集開始', at: ['md', [1, 22], 'after'] },
-        { key: 'shimekiri', label: '募集締切', at: ['md', [1, 30], 'before'] },
-      ] },
+      tracker: { type: 'recruit', label: '確認', step: 'matome' },
+      steps: YE_STEPS('募集職種一覧・募集案内を添付', '募集職種一覧の修正の受付', '募集職種一覧を確定', { kakutei: 'recruit' }, ['due', 0], ['due', 2]) },
     { key: 'saido', title: '再度の任用（本人への通知）', src: 'saido', notice: [1, 8], due: [3, 19], dueLabel: '本人通知の期限',
       points: ['各課から現職員へ、様式1（行う）・様式2（行わない）・様式3（対象外：3会計年度目）で通知してもらう', '予算の議決までは再度の任用となる見込みとして扱う', '特定財源で人件費を措置している職員は、予算の議決後に通知', '総務課合議は不要。対象者一覧に修正があれば連絡してもらう'],
-      tracker: { type: 'reappoint', label: '本人通知', step: 'kakunin' },
-      steps: [
-        { key: 'ichiran', label: '別添「対象者一覧」を作成（「再度の任用」の一覧を書き出し）', at: ['notice', -7], tab: 'reappoint' },
-        { key: 'yoshiki', label: '様式1・様式2・様式3を準備', at: ['notice', -5] },
-        ...KESSAI('対象者一覧・様式を添付'),
-        { key: 'shusei', label: '対象者一覧の修正連絡を受けて反映', at: ['due', -7] },
-        { key: 'tokutei', label: '特定財源の職員：予算の議決後に通知されたか確認', at: ['due', 0] },
-        { key: 'kakunin', label: '各課の本人通知の完了を確認', at: ['due', 0] },
-      ] },
+      tracker: { type: 'reappoint', label: '本人通知', step: 'matome' },
+      steps: YE_STEPS('対象者一覧・様式1〜3を添付', '対象者一覧の修正連絡の受付・各課の本人通知の完了確認', '「再度の任用」で翌年度の任用を登録', { kakutei: 'reappoint' }) },
     { key: 'senko', title: '選考方法・選考結果報告', src: 'senko', notice: [1, 26], due: [2, 27], dueLabel: '結果報告の期限',
       points: ['書類審査（書類審査採点表）又は面接審査（面接評定表）。どちらにするかは各課が判断', '面接の日程は各課が申込者と調整。併願者は担当課間で調整（紹介状は併願数分）', '結果報告に添付：応募者一覧表、採点表又は評定表、応募者全員の応募申込書・職務等経歴書（必要に応じて資格証の写し）'],
-      tracker: { type: 'recruit', label: '結果報告', step: 'kaito' },
-      steps: [
-        { key: 'yoshiki', label: '様式集を保存（P:\\1100-総務課\\01-共通\\R◯会計年度任用職員様式集）', at: ['notice', -3] },
-        ...KESSAI('様式の保存先を明記'),
-        { key: 'kaifu', label: '応募書類・紹介状を担当課へ回付', at: ['md', [2, 2], 'after'] },
-        { key: 'kaito', label: '選考結果報告（伺い文書の回覧）の受付', at: ['due', 0] },
-        { key: 'tenpu', label: '添付書類を確認（応募者一覧表・採点表/評定表・申込書等）', at: ['due', 2] },
-        { key: 'gokaku', label: '合格者を「採用試験」に記録し、翌年度の任用を登録', at: ['due', 7], tab: 'exam' },
-      ] },
+      tracker: { type: 'recruit', label: '結果報告', step: 'matome' },
+      steps: YE_STEPS('様式の保存先を明記', '選考結果報告の受付・添付書類の確認', '合格者を「採用試験」に記録し、翌年度の任用を登録', { kakutei: 'exam' }) },
     { key: 'kirikae', title: '年度切替の任用・退職の事務手続き', src: 'kirikae', notice: [2, 26], due: [3, 23], dueLabel: '起案の合議期限', due2: [3, 31], due2Label: '退職者の書類の期限',
       points: ['4/1付け任用（再度の任用を含む）は、記載例・任用予定者一覧を参考に起案して総務課へ合議', '起案日は当初予算の議決後の日付。添付は辞令書・勤務条件通知書のみ（履歴書等は不要）', '3/31付け退職者は、資格確認証（マイナ保険証未取得の場合）・タイムカード・名札ケースを提出'],
-      tracker: { type: 'kian', label: '合議', step: 'kaito' },
-      tracker2: { type: 'retire', label: '退職者の書類', step: 'taishoku', items: ['資格確認証', 'タイムカード', '名札ケース'] },
-      steps: [
-        { key: 'kisairei', label: '任用起案の記載例を作成', at: ['notice', -5] },
-        { key: 'yotei', label: '任用予定者一覧を作成（「任用一覧」をExcelに書き出し）', at: ['notice', -3], tab: 'appoint' },
-        ...KESSAI('記載例を添付'),
-        { key: 'soufu', label: '任用予定者一覧を各課へ送付', at: ['notice', 1] },
-        { key: 'kaito', label: '任用起案の合議の受付（起案日が議決後か・添付が辞令書と勤務条件通知書のみか確認）', at: ['due', 0] },
-        { key: 'taishoku', label: '3/31退職者の書類の受付（資格確認証・タイムカード・名札ケース）', at: ['due2', 0], tab: 'retire' },
-      ] },
+      tracker: { type: 'kian', label: '合議', step: 'matome' },
+      tracker2: { type: 'retire', label: '退職者の書類', step: 'matome', items: ['資格確認証', 'タイムカード', '名札ケース'] },
+      steps: YE_STEPS('記載例・任用予定者一覧を添付', '任用起案の合議・3/31退職者の書類の受付', '翌年度の任用一覧を確定、退職者の退職を登録', { kakutei: 'appoint' }, ['due2', 0], ['due2', 1]) },
   ];
   function yearEndNoticeDates(targetFy, n) {
     return {
@@ -1763,8 +1720,8 @@
     if (!data.yearEnd || typeof data.yearEnd !== 'object') data.yearEnd = {};
     let list = data.yearEnd[targetFy];
     let changed = false;
-    if (!list || list.version !== 2) {
-      list = data.yearEnd[targetFy] = { version: 2, createdAt: toISO(new Date()), budgetDate: '', notices: {} };
+    if (!list || list.version !== 3) {
+      list = data.yearEnd[targetFy] = { version: 3, createdAt: toISO(new Date()), budgetDate: '', notices: {} };
       changed = true;
     }
     for (const n of YEAR_END_NOTICES) {

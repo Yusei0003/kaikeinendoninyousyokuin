@@ -2231,7 +2231,7 @@ function renderYearEnd() {
         <td>${yeDate(n.dates.due)}${n.dates.due2 ? `<br>${yeDate(n.dates.due2)}` : ''}</td>
         <td class="ye-prog">${yeBar(n.done, n.total)} <small>${n.done}/${n.total}</small></td>
         <td>${trs.map((tr) => `<span class="badge ${tr.done === tr.total ? 'st-ok' : 'st-warn'}">${escapeHtml(tr.label)} ${tr.done}/${tr.total}</span>`).join('<br>') || '<span class="muted">-</span>'}</td>
-        <td>${n.next ? `<span class="badge ${cls}">${label}</span> ${yeDate(n.next.date)} ${escapeHtml(n.next.label)}` : '<span class="badge st-ok">完了</span>'}</td>
+        <td>${n.next ? `<span class="badge ${cls}">${label}</span> ${yeDate(n.next.date)} ${escapeHtml(n.next.label.replace(/（.*$/, ''))}` : '<span class="badge st-ok">完了</span>'}</td>
         <td><button class="btn-small">開く</button></td></tr>`;
     }),
   );
@@ -2288,9 +2288,8 @@ function renderYearEnd() {
   // 回答の受付：全部そろったら受付の作業を完了にする
   const autoStep = (key) => {
     const n = C.yearEndView(DATA, target, t, DATA.settings).find((x) => x.key === key);
-    for (const tr of [n.tracker, n.tracker2].filter(Boolean)) {
-      if (tr.total && tr.done === tr.total && !rec(key).steps[tr.step]) rec(key).steps[tr.step] = t;
-    }
+    const trs = [n.tracker, n.tracker2].filter(Boolean);
+    if (trs.length && trs.every((tr) => tr.total && tr.done === tr.total) && !rec(key).steps.matome) rec(key).steps.matome = t;
   };
   root.querySelectorAll('[data-ye-resp]').forEach((el) => (el.onclick = () => {
     const [k, dept, v] = el.dataset.yeResp.split('|');

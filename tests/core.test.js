@@ -681,21 +681,20 @@ test('年度替わり事務：令和8年度任用は通知どおりの日程、�
     ['2026-01-08', '2026-03-19'], ['2026-01-26', '2026-02-27'], ['2026-02-26', '2026-03-23']]);
   assert.strictEqual(r8.kirikae.dates.due2, '2026-03-31');
   const step = (n, k) => n.steps.find((s) => s.key === k);
-  assert.strictEqual(step(r8.boshu, 'kaishi').date, '2026-01-22');
-  assert.strictEqual(step(r8.boshu, 'hassin').date, '2026-01-08');
-  assert.strictEqual(step(r8.boshu, 'ichiran').date, '2025-12-26'); // 12/29は年末年始 → 前の開庁日
+  assert.deepStrictEqual(r8.boshu.steps.map((x) => [x.key, x.date]), [['tsuchi', '2026-01-08'], ['matome', '2026-01-16'], ['kakutei', '2026-01-19']]);
+  assert.deepStrictEqual(r8.kirikae.steps.map((x) => x.date), ['2026-02-26', '2026-03-31', '2026-04-01']);
   assert.strictEqual(r8.kibo.state, 'overdue');
-  assert.strictEqual(r8.kibo.next.key, 'sakusei');
+  assert.strictEqual(r8.kibo.next.key, 'tsuchi');
   // 作業を済にすると次にやることが進む
-  d.yearEnd[2026].notices.kibo.steps.sakusei = '2025-10-29';
-  assert.strictEqual(v(2026).kibo.next.key, 'kessai');
+  d.yearEnd[2026].notices.kibo.steps.tsuchi = '2025-11-05';
+  assert.strictEqual(v(2026).kibo.next.key, 'matome');
   // 通知日を直すと作業の目安日も動く
   d.yearEnd[2026].notices.kibo.dates.notice = '2025-11-10';
-  assert.strictEqual(step(v(2026).kibo, 'hassin').date, '2025-11-10');
+  assert.strictEqual(step(v(2026).kibo, 'tsuchi').date, '2025-11-10');
   C.ensureYearEnd(d, 2027);
   assert.strictEqual(v(2027).kibo.dates.due, '2026-11-20'); // R8.11.21は土曜 → 前の金曜
   C.ensureYearEnd(d, 2028);
-  assert.strictEqual(step(v(2028).boshu, 'kaishi').date, '2028-01-24'); // 開始日は土日なら後ろへ
+  assert.strictEqual(v(2028).boshu.dates.notice, '2028-01-07'); // R10.1.8は土曜 → 前の金曜
   // 閉庁日：春分の日・振替休日・年末年始・成人の日
   assert.strictEqual(C.isClosedDay('2026-03-20'), true);
   assert.strictEqual(C.isClosedDay('2027-03-22'), true);
