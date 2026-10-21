@@ -27,6 +27,7 @@
   <button class="tab-btn" data-tab="recruit">公募職種</button>
   <button class="tab-btn" data-tab="reappoint">再度の任用</button>
   <button class="tab-btn" data-tab="retire">退職・残留</button>
+  <button class="tab-btn" data-tab="yearend">年度替わり事務</button>
   <span class="tab-sep" aria-hidden="true"></span>
   <button class="tab-btn" data-tab="eval">人事評価</button>
   <button class="tab-btn" data-tab="exam">採用試験</button>
@@ -195,6 +196,24 @@
       <p class="hint">対象年度の職員が翌年度に残るか・残らないかを一覧で管理します。任期満了・自己都合などの退職は「退職を登録」から記録し、退職手続き（申送事項「退職処理」）の進み具合もチェックできます。年度途中の退職は任期の終了日を退職日に変更します。任期満了退職者は各課からの合議がないため、ここで確認してください（申送事項）。</p>
       <div id="retire-summary" class="mini-stats"></div>
       <div id="retire-table"></div>
+    </div>
+  </section>
+
+  <!-- ============ 年度替わり事務 ============ -->
+  <section id="panel-yearend" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2 id="yearend-title">年度替わり事務</h2>
+        <div class="row-actions">
+          <button class="btn-secondary" id="btn-yearend-add">項目を追加</button>
+          <button class="btn-secondary" id="btn-yearend-reset">日程を計算し直す</button>
+          <button class="btn-secondary" id="btn-yearend-export">Excelに書き出す</button>
+        </div>
+      </div>
+      <p class="hint">対象年度の職員を翌年度4月1日に任用するまでの手続き（任用希望調査 → 再度の任用の希望確認 → 募集・選考 → 再度の任用の通知 → 任用の起案 → 退職者の書類提出）のチェックリストです。<strong>年度を開くと、その年度の分が自動で作られます。</strong>期限は令和8年度任用の総務課長通知の日程をもとに、土日・祝日・年末年始を避けて計算した目安です。その年の通知が出たら期限を直してください。確認項目をすべてチェックすると完了になります。</p>
+      <p id="yearend-created" class="hint"></p>
+      <div id="yearend-summary" class="mini-stats"></div>
+      <div id="yearend-list" class="ye-list"></div>
     </div>
   </section>
 

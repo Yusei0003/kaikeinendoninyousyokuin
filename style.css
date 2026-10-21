@@ -553,3 +553,26 @@ select.intent-select.empty { border-color: var(--warning-border); background: va
 .nensu-fy { margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
 .nensu-fy label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .nensu-fy select { border: 2px solid var(--warning-border); border-radius: 6px; padding: 6px 10px; font-size: 14px; font-weight: 700; background: var(--warning-bg); }
+
+/* 年度替わり事務 */
+.ye-progress { position: relative; height: 18px; background: #eef2f7; border-radius: 9px; overflow: hidden; margin: 6px 0 12px; flex-basis: 100%; }
+.ye-progress span { display: block; height: 100%; background: #86c99a; }
+.ye-progress em { position: absolute; inset: 0; text-align: center; font-size: 11px; font-style: normal; line-height: 18px; font-weight: 700; }
+.ye-list { display: flex; flex-direction: column; gap: 10px; }
+.ye-item { border: 1px solid var(--border); border-left: 5px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.ye-item.ye-s-done { border-left-color: #86c99a; background: #f7fbf8; }
+.ye-item.ye-s-overdue { border-left-color: var(--danger); background: var(--error-bg); }
+.ye-item.ye-s-soon { border-left-color: var(--warning-border); background: var(--warning-bg); }
+.ye-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ye-done { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; cursor: pointer; }
+.ye-done input { width: 18px; height: 18px; }
+.ye-item.ye-s-done .ye-done span { text-decoration: line-through; color: var(--muted); }
+.ye-count { font-size: 12px; }
+.ye-dates { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+.ye-due { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.ye-checks { display: flex; flex-direction: column; gap: 3px; padding-left: 26px; font-size: 13px; }
+.ye-check { display: flex; align-items: flex-start; gap: 6px; cursor: pointer; }
+.ye-check input { margin-top: 3px; }
+.ye-notes { margin: 0; padding-left: 44px; font-size: 12px; color: var(--muted); }
+.ye-src { font-size: 11px; color: var(--muted); padding-left: 26px; }
+.ye-memo { margin-left: 26px; font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; max-width: 600px; }

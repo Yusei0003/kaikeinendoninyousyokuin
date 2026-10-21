@@ -252,6 +252,12 @@ function upcomingProcedures(t, days) {
     if (s.hireDate < C.addDaysISO(t, -days) || s.hireDate > limit) continue;
     out.push({ date: s.hireDate, name: s.name, staffId: s.id, what: `任用が未登録（名簿の採用日。${s.rosterDept || ''} ${s.rosterTitle || ''}）`, basis: '職員名簿の取込' });
   }
+  for (const fy of Object.keys(DATA.yearEnd || {})) {
+    for (const it of C.yearEndItems(DATA, Number(fy))) {
+      if (it.done || !it.due || it.due > limit || it.due < C.addDaysISO(t, -days)) continue;
+      out.push({ date: it.due, name: '', staffId: '', what: `年度替わり事務：${it.title}（${C.fyLabel(Number(fy))}任用）${it.due < t ? '【期限切れ】' : ''}`, basis: it.source || '年度替わり事務' });
+    }
+  }
   return out.sort((x, y) => x.date.localeCompare(y.date));
 }
 function renderHome() {
@@ -303,7 +309,7 @@ function renderHome() {
   }));
   document.getElementById('home-procedures').innerHTML = tableHtml(
     ['期日', '氏名', '手続き・確認', '根拠'],
-    procs.map((p) => `<tr><td>${C.formatDateJa(p.date)}</td><td>${nameLink(p.staffId)}</td><td>${escapeHtml(p.what)}</td><td><small class="muted">${escapeHtml(p.basis)}</small></td></tr>`),
+    procs.map((p) => `<tr><td>${C.formatDateJa(p.date)}</td><td>${p.staffId ? nameLink(p.staffId) : '—'}</td><td>${escapeHtml(p.what)}</td><td><small class="muted">${escapeHtml(p.basis)}</small></td></tr>`),
     '90日以内に予定されている手続きはありません。',
   );
   const month = Number(t.slice(5, 7));
@@ -2148,6 +2154,138 @@ function exportRetire() {
 }
 
 /* ------------------------------------------------------------
+ * 年度替わり事務（チェックリスト）
+ * 対象年度の職員を翌年度4月1日に任用するまでの事務。年度を開くと自動で作られる。
+ * ------------------------------------------------------------ */
+const YE_STATE = {
+  done: ['完了', 'st-ok'], overdue: ['期限切れ', 'st-err'], soon: ['14日以内', 'st-warn'], later: ['予定', 'st-muted'],
+};
+const TAB_LABEL = { recruit: '公募職種', intent: '年目・任用意向', exam: '採用試験', reappoint: '再度の任用', retire: '退職・残留', appoint: '任用一覧' };
+/** チェックリストがなければ作って保存する（描画中に呼ぶため saveData は使わない） */
+function ensureYearEndSaved(targetFy) {
+  if (!C.ensureYearEnd(DATA, targetFy)) return;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA)); } catch (e) { /* 次の保存時に書き込まれる */ }
+}
+function yeDate(iso) { return iso ? C.toWarekiShort(iso) : ''; }
+function renderYearEnd() {
+  const fy = currentFy();
+  const target = fy + 1;
+  ensureYearEndSaved(target);
+  const list = DATA.yearEnd[target];
+  const t = todayISO();
+  const items = C.yearEndItems(DATA, target);
+  document.getElementById('yearend-title').textContent =
+    `${fyShort(target)}年度任用に係る年度替わり事務（${fyShort(fy)}.11〜${fyShort(target)}.4）`;
+  document.getElementById('yearend-created').textContent = `このチェックリストは${C.formatDateJa(list.createdAt) || ''}に自動で作成しました。`;
+  const st = items.map((it) => C.yearEndState(it, t));
+  const n = (k) => st.filter((s) => s === k).length;
+  const pct = items.length ? Math.round((n('done') / items.length) * 100) : 0;
+  document.getElementById('yearend-summary').innerHTML = miniStats([
+    ['手続き', `${items.length}件`],
+    ['完了', `${n('done')}件`, 'ok'],
+    ['期限切れ', `${n('overdue')}件`, n('overdue') ? 'err' : ''],
+    ['14日以内', `${n('soon')}件`, n('soon') ? 'warn' : ''],
+    ['予定', `${n('later')}件`],
+  ]) + `<div class="ye-progress" title="${pct}%"><span style="width:${pct}%"></span><em>${pct}%</em></div>`;
+
+  document.getElementById('yearend-list').innerHTML = items.map((it, idx) => {
+    const s = st[idx];
+    const [label, cls] = YE_STATE[s];
+    const dates = [
+      it.notice ? `通知 ${yeDate(it.notice)}` : '',
+      it.start ? `期間 ${yeDate(it.start)}〜${yeDate(it.due)}` : '',
+    ].filter(Boolean).join('　');
+    const dueCtl = it.key === 'yosan'
+      ? `<label class="ye-due">議決日 <input type="date" data-ye-budget value="${escapeHtml(list.budgetDate || '')}"></label>`
+      : `<label class="ye-due">${it.start ? '終了' : '期限'} <input type="date" data-ye-due="${idx}" value="${escapeHtml(it.due || '')}"></label>`;
+    const checks = it.checks.map((c, i) => `<label class="ye-check"><input type="checkbox" data-ye-check="${idx}:${i}"${it.checks && (list.items.find((x) => x.key === it.key).checks || {})[i] ? ' checked' : ''}> ${escapeHtml(c)}</label>`).join('');
+    return `<div class="ye-item ye-s-${s}">
+      <div class="ye-head">
+        <label class="ye-done"><input type="checkbox" data-ye-done="${idx}"${it.done ? ' checked' : ''}><span>${escapeHtml(it.title)}</span></label>
+        <span class="badge ${cls}">${label}</span>
+        ${it.who ? `<span class="badge st-info">${escapeHtml(it.who)}</span>` : ''}
+        ${it.checks.length ? `<span class="muted ye-count">${it.checked}/${it.checks.length}</span>` : ''}
+      </div>
+      <div class="ye-dates">${dueCtl}${dates ? `<span class="muted">${dates}</span>` : ''}${it.done && it.doneAt ? `<span class="muted">完了 ${yeDate(it.doneAt)}</span>` : ''}
+        ${it.tab ? `<button class="btn-small" data-goto="${it.tab}">${TAB_LABEL[it.tab]}を開く</button>` : ''}
+        ${it.custom ? `<button class="btn-small" data-ye-del="${idx}">削除</button>` : ''}</div>
+      ${checks ? `<div class="ye-checks">${checks}</div>` : ''}
+      ${it.notes.length ? `<ul class="ye-notes">${it.notes.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : ''}
+      ${it.source ? `<div class="ye-src">出典：${escapeHtml(it.source)}</div>` : ''}
+      <input type="text" class="ye-memo" data-ye-memo="${idx}" placeholder="メモ（担当・進み具合など）" value="${escapeHtml(it.memo || '')}">
+    </div>`;
+  }).join('');
+
+  const box = document.getElementById('yearend-list');
+  const rec = (idx) => list.items.find((x) => x.key === items[idx].key);
+  box.querySelectorAll('[data-ye-done]').forEach((el) => (el.onchange = () => {
+    const r = rec(Number(el.dataset.yeDone));
+    r.done = el.checked;
+    r.doneAt = el.checked ? t : '';
+    saveData();
+  }));
+  box.querySelectorAll('[data-ye-check]').forEach((el) => (el.onchange = () => {
+    const [idx, i] = el.dataset.yeCheck.split(':').map(Number);
+    const r = rec(idx);
+    r.checks = { ...(r.checks || {}), [i]: el.checked };
+    // すべてチェックしたら完了にする
+    if (items[idx].checks.every((_, k) => r.checks[k]) && !r.done) { r.done = true; r.doneAt = t; }
+    saveData();
+  }));
+  box.querySelectorAll('[data-ye-due]').forEach((el) => (el.onchange = () => { rec(Number(el.dataset.yeDue)).due = el.value; saveData(); }));
+  box.querySelectorAll('[data-ye-memo]').forEach((el) => (el.onchange = () => { rec(Number(el.dataset.yeMemo)).memo = el.value; saveData(); }));
+  box.querySelectorAll('[data-ye-budget]').forEach((el) => (el.onchange = () => {
+    list.budgetDate = el.value;
+    const r = list.items.find((x) => x.key === 'yosan');
+    if (r && el.value) { r.due = el.value; r.done = true; r.doneAt = r.doneAt || t; r.checks = { 0: true }; }
+    saveData();
+  }));
+  box.querySelectorAll('[data-ye-del]').forEach((el) => (el.onclick = () => {
+    if (!confirm('この項目を削除しますか？')) return;
+    const r = rec(Number(el.dataset.yeDel));
+    list.items = list.items.filter((x) => x !== r);
+    saveData();
+  }));
+  box.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => window.activateTab(b.dataset.goto)));
+}
+function addYearEndItem() {
+  const target = currentFy() + 1;
+  openForm(`${fyShort(target)}年度任用の年度替わり事務に項目を追加`, [
+    { key: 'title', label: '手続き', required: true, full: true },
+    { key: 'who', label: '担当', placeholder: '例：各課→総務課' },
+    { key: 'due', label: '期限', type: 'date' },
+    { key: 'memo', label: 'メモ', full: true },
+  ], {}, (v) => {
+    ensureYearEndSaved(target);
+    DATA.yearEnd[target].items.push({ key: C.uid('ye'), custom: true, title: v.title, who: v.who, due: v.due, notice: '', start: '', done: false, doneAt: '', checks: {}, memo: v.memo });
+    saveData();
+    return undefined;
+  });
+}
+function resetYearEndDates() {
+  const target = currentFy() + 1;
+  if (!confirm('期限・通知日を、ひな形（令和8年度任用の通知の日程）から計算し直します。チェックとメモはそのまま残ります。よろしいですか？')) return;
+  ensureYearEndSaved(target);
+  for (const r of DATA.yearEnd[target].items) {
+    const tpl = C.YEAR_END_TEMPLATE.find((x) => x.key === r.key);
+    if (tpl) Object.assign(r, C.yearEndDates(target, tpl));
+  }
+  saveData();
+  showToast('日程を計算し直しました。');
+}
+function exportYearEnd() {
+  const target = currentFy() + 1;
+  const rows = [['手続き', '担当', '通知日', '開始', '期限', '状態', '確認項目', 'メモ', '出典']];
+  const t = todayISO();
+  C.yearEndItems(DATA, target).forEach((it) => {
+    const r = DATA.yearEnd[target].items.find((x) => x.key === it.key);
+    rows.push([it.title, it.who || '', yeDate(it.notice), yeDate(it.start), yeDate(it.key === 'yosan' ? DATA.yearEnd[target].budgetDate : it.due), YE_STATE[C.yearEndState(it, t)][0],
+      it.checks.map((c, i) => `${(r.checks || {})[i] ? '☑' : '☐'} ${c}`).join('\n'), it.memo || '', it.source]);
+  });
+  writeWorkbook(`${C.fyLabel(target)}任用_年度替わり事務_${stamp()}.xlsx`, [{ name: '年度替わり事務', rows }]);
+}
+
+/* ------------------------------------------------------------
  * 初期化
  * ------------------------------------------------------------ */
 function renderAll() {
@@ -2163,6 +2301,7 @@ function renderAll() {
   renderRecruit();
   renderReappoint();
   renderRetire();
+  renderYearEnd();
 }
 function init() {
   loadData();
@@ -2213,6 +2352,9 @@ function init() {
   document.getElementById('btn-reappoint-export').onclick = exportReappoint;
   document.getElementById('retire-filter').onchange = renderRetire;
   document.getElementById('btn-retire-export').onclick = exportRetire;
+  document.getElementById('btn-yearend-add').onclick = addYearEndItem;
+  document.getElementById('btn-yearend-reset').onclick = resetYearEndDates;
+  document.getElementById('btn-yearend-export').onclick = exportYearEnd;
 
   document.getElementById('import-file').onchange = onImportFile;
   document.getElementById('import-kind').onchange = renderImportPreview;

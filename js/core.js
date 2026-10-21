@@ -151,6 +151,7 @@
       recruitPositions: [],
       recruitDecisions: {},
       legalTexts: {},
+      yearEnd: {},
       settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
       lastBackupAt: null,
     };
@@ -173,6 +174,7 @@
     }
     out.settings = { ...base.settings, ...(raw.settings || {}) };
     out.legalTexts = { ...(raw.legalTexts || {}) };
+    if (!raw.yearEnd || typeof raw.yearEnd !== 'object') out.yearEnd = {};
     return out;
   }
 
@@ -1603,6 +1605,147 @@
     return hits.length === 1 ? hits[0] : null;
   }
 
+  /* ------------------------------------------------------------
+   * 年度替わり事務のチェックリスト
+   * 総務課長通知（陸高総号外。R7.11.5・R7.11.28・R8.1.8×2・R8.1.26・R8.2.26）の
+   * 令和8年度任用の日程をひな形とし、他の年度は同じ月日を土日・祝日・年末年始を避けてずらす。
+   * ------------------------------------------------------------ */
+  /** 春分の日（1980〜2099年の近似式） */
+  function shunbunDay(y) {
+    return Math.floor(20.8431 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4));
+  }
+  /** 閉庁日（土日・11〜4月の祝日と振替休日・年末年始12/29〜1/3） */
+  function isClosedDay(iso) {
+    const d = parseISO(iso);
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) return true;
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    if ((m === 12 && day >= 29) || (m === 1 && day <= 3)) return true;
+    const y = d.getFullYear();
+    const holidays = (yy) => {
+      const firstMon = ((8 - new Date(yy, 0, 1).getDay()) % 7) + 1; // 1月の第1月曜
+      return [`${yy}-11-03`, `${yy}-11-23`, `${yy}-01-01`, toISO(new Date(yy, 0, firstMon + 7)), `${yy}-02-11`, `${yy}-02-23`,
+        toISO(new Date(yy, 2, shunbunDay(yy))), `${yy}-04-29`];
+    };
+    const hs = holidays(y);
+    if (hs.includes(iso)) return true;
+    // 振替休日：日曜の祝日の翌日（以降の平日）
+    for (const h of hs) {
+      if (parseISO(h).getDay() !== 0) continue;
+      let n = addDaysISO(h, 1);
+      while (hs.includes(n)) n = addDaysISO(n, 1);
+      if (n === iso) return true;
+    }
+    return false;
+  }
+  /** 閉庁日なら前（before）または後（after）の開庁日にずらす */
+  function toBusinessDay(iso, dir) {
+    let d = iso;
+    const step = dir === 'after' ? 1 : -1;
+    for (let i = 0; i < 10 && isClosedDay(d); i++) d = addDaysISO(d, step);
+    return d;
+  }
+  /** 対象年度（4/1任用の年度）の m月d日。11・12月は前年 */
+  function yearEndDate(targetFy, md, dir = 'before') {
+    if (!md) return '';
+    const [m, d] = md;
+    const y = m >= 5 ? targetFy - 1 : targetFy;
+    return toBusinessDay(toISO(new Date(y, m - 1, d)), dir);
+  }
+  const YEAR_END_SRC = {
+    kibo: '任用に係る会計年度任用職員の任用希望調査について（R7.11.5 総務課長通知）',
+    kakunin: '会計年度任用職員の再度の任用に係る確認について（R7.11.28 総務課長通知）',
+    boshu: '会計年度任用職員の募集方法について（R8.1.8 総務課長通知）',
+    saido: '任用に係る会計年度任用職員の再度の任用について（R8.1.8 総務課長通知）',
+    senko: '会計年度任用職員の選考方法について（R8.1.26 総務課長通知）',
+    kirikae: '年度切替に伴う会計年度任用職員の任用及び退職に係る事務手続きについて（R8.2.26 総務課長通知）',
+  };
+  /**
+   * ひな形。notice=通知日、start=期間の開始、due=期限（いずれも[月,日]）。
+   * who: 誰がするか、tab: 関係するタブ
+   */
+  const YEAR_END_TEMPLATE = [
+    { key: 'kibo', title: '任用希望調査の報告', who: '各課→総務課', notice: [11, 5], due: [11, 21], tab: 'recruit', src: 'kibo',
+      checks: ['翌年度に新たに任用を希望する職を「任用希望調査シート」に記入（職務内容等）', '今年度で廃止する事業の会計年度任用職員を報告', 'グループウェアのメッセージで総務課職員係へ送信'],
+      notes: ['引き続き任用を希望する職員（4会計年度目以降の公募を含む）は報告不要', '総務課が職員の必要性を聞き取る場合あり'] },
+    { key: 'mendan', title: '人事評価面談で再度の任用の希望を確認', who: '各課', due: [11, 27], tab: 'intent', src: '',
+      checks: ['面談で本人の再度の任用の希望の有無を確認', '「年目・任用意向」タブに可否・本人の希望を入力'],
+      notes: ['期限は目安（次の確認通知の前日）。通知文はありません'] },
+    { key: 'kakunin', title: '再度の任用の希望の確認（面談で確認できなかった職員）', who: '各課→総務課', notice: [11, 28], due: [12, 8], tab: 'intent', src: 'kakunin',
+      checks: ['別紙一覧の職員に希望の有無を確認', '総務課へ提出'],
+      notes: ['任用開始から3会計年度目の職員は、人事評価の結果による再度の任用の対象外。翌年度も任用する予定なら公募（再度の応募は可）'] },
+    { key: 'shokushu', title: '募集職種一覧の確認・修正', who: '各課→総務課', notice: [1, 8], due: [1, 16], tab: 'recruit', src: 'boshu',
+      checks: ['別添「募集職種一覧」の内容を確認', '加筆修正があれば朱書き訂正して総務課職員係へ提出'] },
+    { key: 'boshu', title: '募集（ハローワークインターネットサービス）', who: '総務課', start: [1, 22], due: [1, 30], startDir: 'after', tab: 'recruit', src: 'boshu',
+      checks: ['ハローワークインターネットサービスへ求人申込み', '募集開始', '募集締切'],
+      notes: ['募集人数に達した場合は受付期間内でも締め切ってよい'] },
+    { key: 'senko', title: '選考（書類審査又は面接審査）', who: '各課', notice: [1, 26], start: [2, 2], due: [2, 20], startDir: 'after', tab: 'exam', src: 'senko',
+      checks: ['選考方法（書類審査か面接審査か）を決める', '面接の日程を申込者と調整', '他職種との併願者は担当課間で調整（紹介状は併願数分提出される）', '書類審査は「書類審査採点表」、面接審査は「面接評定表」で採点', '採用者を決定'],
+      notes: ['様式の保存先：P:\\1100-総務課\\01-共通\\R◯会計年度任用職員様式集'] },
+    { key: 'kekka', title: '合否通知・選考結果の報告', who: '各課→総務課', due: [2, 27], tab: 'exam', src: 'senko',
+      checks: ['応募者へ合格・不合格を通知', '選考結果の伺い文書を総務課へ回覧', '添付：応募者一覧表', '添付：書類審査採点表又は面接評定表', '添付：応募者全員の応募申込書・職務等経歴書（必要に応じて資格証の写し）'] },
+    { key: 'yosan', title: '当初予算の議決（3月議会）', who: '議会', due: null, tab: '', src: 'saido', dateInput: true,
+      checks: ['議決日を記録する'],
+      notes: ['議決までは再度の任用は「見込み」として扱う', '任用の起案日・特定財源の職員への通知は議決後'] },
+    { key: 'tsuchi', title: '現職員へ再度の任用の通知', who: '各課', notice: [1, 8], due: [3, 19], tab: 'reappoint', src: 'saido',
+      checks: ['別添対象者一覧を確認（修正があれば総務課へ連絡）', '様式1：再度の任用を行う職員', '様式2：再度の任用を行わない職員', '様式3：再度の任用の対象とならない職員（3会計年度目）', '特定財源で人件費を措置している職員は予算の議決後に通知'],
+      notes: ['総務課合議は不要', '予算の議決までは再度の任用となる見込みとして扱う'] },
+    { key: 'kian', title: '4月1日付け任用の起案・総務課合議', who: '各課→総務課', notice: [2, 26], due: [3, 23], tab: 'reappoint', src: 'kirikae',
+      checks: ['記載例・任用予定者一覧を参考に起案（再度の任用となる職員を含む）', '起案日は当初予算の議決後の日付', '添付は辞令書・勤務条件通知書のみ（履歴書等は不要）', '総務課へ合議'] },
+    { key: 'taishoku', title: '3月31日付け退職職員の書類提出', who: '各課→総務課', notice: [2, 26], due: [3, 31], tab: 'retire', src: 'kirikae',
+      checks: ['資格確認証（マイナ保険証を取得していない場合）', 'タイムカード', '名札ケース'] },
+    { key: 'ninyo', title: '任用開始', who: '', due: [4, 1], dueDir: 'none', tab: 'appoint', src: '',
+      checks: ['辞令交付', '任用一覧に翌年度の任用が揃っているか確認'] },
+  ];
+  /** 対象年度の日程（ひな形から計算） */
+  function yearEndDates(targetFy, t) {
+    return {
+      notice: t.notice ? yearEndDate(targetFy, t.notice, 'before') : '',
+      start: t.start ? yearEndDate(targetFy, t.start, t.startDir || 'before') : '',
+      due: !t.due ? '' : t.dueDir === 'none' ? toISO(new Date(t.due[0] >= 5 ? targetFy - 1 : targetFy, t.due[0] - 1, t.due[1])) : yearEndDate(targetFy, t.due, 'before'),
+    };
+  }
+  /**
+   * 対象年度（4/1任用の年度）のチェックリストがなければ作る。ひな形に増えた項目も足す。
+   * 作った・足したときは true
+   */
+  function ensureYearEnd(data, targetFy) {
+    if (!data.yearEnd || typeof data.yearEnd !== 'object') data.yearEnd = {};
+    let list = data.yearEnd[targetFy];
+    let changed = false;
+    if (!list) {
+      list = data.yearEnd[targetFy] = { createdAt: toISO(new Date()), budgetDate: '', items: [] };
+      changed = true;
+    }
+    for (const t of YEAR_END_TEMPLATE) {
+      if (list.items.some((it) => it.key === t.key)) continue;
+      list.items.push({ key: t.key, ...yearEndDates(targetFy, t), done: false, doneAt: '', checks: {}, memo: '' });
+      changed = true;
+    }
+    return changed;
+  }
+  /** 表示用：ひな形の文言と保存した進み具合を合わせ、期日順に並べる */
+  function yearEndItems(data, targetFy) {
+    const list = (data.yearEnd || {})[targetFy];
+    if (!list) return [];
+    const order = (it) => it.due || it.start || (it.key === 'yosan' ? (list.budgetDate || yearEndDate(targetFy, [3, 18])) : '9999');
+    return list.items.map((it) => {
+      const t = YEAR_END_TEMPLATE.find((x) => x.key === it.key) || { title: it.title || '', who: it.who || '', checks: [], notes: [], src: '', tab: '' };
+      const checks = t.checks || [];
+      const checked = checks.filter((_, i) => it.checks && it.checks[i]).length;
+      return { ...t, ...it, title: t.title || it.title, source: YEAR_END_SRC[t.src] || '', checks, notes: t.notes || [], checked, sortKey: order(it) };
+    }).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  }
+  /** 期日に対する状態：done / overdue / soon（14日以内）/ later */
+  function yearEndState(it, today) {
+    if (it.done) return 'done';
+    if (!it.due) return 'later';
+    if (it.due < today) return 'overdue';
+    if (diffDays(today, it.due) <= 14) return 'soon';
+    return 'later';
+  }
+
   const api = {
     APPOINT_TYPE_LABEL, APPOINT_TYPE_SHORT, RECRUIT_LABEL, PAY_TYPE_LABEL, EXAM_METHOD_LABEL,
     RESULT_LABEL, RECOMMEND_LABEL, WISH_LABEL, STATUS_LABEL, DEFAULT_SETTINGS, IMPORT_SCHEMAS, KUBUN_LABEL,
@@ -1619,6 +1762,7 @@
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
+    YEAR_END_TEMPLATE, YEAR_END_SRC, isClosedDay, toBusinessDay, yearEndDates, ensureYearEnd, yearEndItems, yearEndState,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

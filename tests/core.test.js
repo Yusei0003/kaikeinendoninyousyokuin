@@ -669,3 +669,27 @@ test('経歴：任用一覧に任用がなくても人事システムの在職�
   assert.strictEqual(sm.cycleYear, 3);
   assert.strictEqual(sm.publicFy, 2027);
 });
+
+test('年度替わり事務：令和8年度任用は通知どおりの日程、他の年度は閉庁日を避けて自動で作る', () => {
+  const d = C.emptyData();
+  assert.strictEqual(C.ensureYearEnd(d, 2026), true);
+  assert.strictEqual(C.ensureYearEnd(d, 2026), false); // 2回目は作らない
+  const due = (fy, key) => C.yearEndItems(d, fy).find((x) => x.key === key);
+  assert.deepStrictEqual(['kibo', 'kakunin', 'shokushu', 'boshu', 'senko', 'kekka', 'tsuchi', 'kian', 'taishoku'].map((k) => due(2026, k).due),
+    ['2025-11-21', '2025-12-08', '2026-01-16', '2026-01-30', '2026-02-20', '2026-02-27', '2026-03-19', '2026-03-23', '2026-03-31']);
+  assert.strictEqual(due(2026, 'boshu').start, '2026-01-22');
+  C.ensureYearEnd(d, 2027);
+  assert.strictEqual(due(2027, 'kibo').due, '2026-11-20'); // R8.11.21は土曜 → 前の金曜
+  assert.strictEqual(due(2027, 'ninyo').due, '2027-04-01');
+  C.ensureYearEnd(d, 2028);
+  assert.strictEqual(due(2028, 'boshu').start, '2028-01-24'); // 開始日は土日なら後ろへ
+  // 閉庁日：春分の日・振替休日・年末年始
+  assert.strictEqual(C.isClosedDay('2026-03-20'), true);
+  assert.strictEqual(C.isClosedDay('2027-03-22'), true); // 春分の日（日）の振替
+  assert.strictEqual(C.isClosedDay('2026-12-29'), true);
+  assert.strictEqual(C.isClosedDay('2027-01-11'), true); // 成人の日
+  assert.strictEqual(C.isClosedDay('2026-03-19'), false);
+  assert.strictEqual(C.yearEndState({ due: '2026-03-19', done: false }, '2026-03-20'), 'overdue');
+  assert.strictEqual(C.yearEndState({ due: '2026-03-19', done: false }, '2026-03-10'), 'soon');
+  assert.deepStrictEqual(C.normalizeData({}).yearEnd, {});
+});
