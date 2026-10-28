@@ -750,16 +750,20 @@ test('科目：会計・款項目の一覧を年度ごとに取り込み、任�
   assert.ifError(res.error);
   assert.strictEqual(res.headerRow, 1);
   assert.deepStrictEqual(res.records.map((r) => [r.srcId, r.deptCode, r.zaimuName, r.account, r.code, r.name, C.kamokuKey(r)]),
-    [['9001', '1050', '架空部架空課', '一般', '20106000115', '架空課予算', '1050-20106000115'], ['9002', '2100', '架空部福祉課', '国保事業', '50102000350', '福祉課予算', '2100-50102000350']]);
+    [['9001', '1050', '架空部架空課', '一般', '20106000115', '架空課予算', '架空課-20106000115'], ['9002', '2100', '架空部福祉課', '国保事業', '50102000350', '福祉課予算', '福祉課-50102000350']]);
   assert.strictEqual('flag' in res.records[0], false); // R列（変・複）は読まない
   const d = baseData();
   assert.deepStrictEqual(C.importKamoku(d, 2026, res.records), { add: 2, update: 0 });
   assert.deepStrictEqual(C.importKamoku(d, 2026, res.records), { add: 0, update: 2 }); // 同じIDは上書き
   assert.strictEqual(C.kamokuOfFy(d, 2025).length, 0); // 年度ごと
-  // 予算科目＝所属＋款項目コード
-  const b0 = appt({ id: 'k0', start: '2026-04-01', end: '2027-03-31', payType: 'monthly', deptCode: '1050', budgetCode: '1050-20106000115' });
+  // 予算科目＝所属（課。部は付けない）＋款項目コード
+  assert.strictEqual(C.deptShort('総務部総務課'), '総務課');
+  assert.strictEqual(C.deptShort('高田診療所'), '高田診療所');
+  const b0 = appt({ id: 'k0', start: '2026-04-01', end: '2027-03-31', payType: 'monthly', deptCode: '1050', budgetCode: '架空課-20106000115' });
   assert.strictEqual(C.kamokuOfAppointment(d, b0).name, '架空課予算');
-  assert.strictEqual(C.kamokuOfAppointment(d, { ...b0, budgetCode: '１０５０　２０１０６０００１１５' }).name, '架空課予算');
+  assert.strictEqual(C.kamokuOfAppointment(d, { ...b0, budgetCode: '架空課　２０１０６０００１１５' }).name, '架空課予算'); // 区切り・全角の違い
+  assert.strictEqual(C.kamokuOfAppointment(d, { ...b0, budgetCode: '架空部架空課-20106000115' }).name, '架空課予算'); // 部から書いても読む
+  assert.strictEqual(C.kamokuOfAppointment(d, { ...b0, budgetCode: '1050-20106000115' }).name, '架空課予算'); // 所属CDで書いたもの
   // 以前の入力（款項目表示だけ）も読める。表記ゆれ（全角・ハイフン）も吸収する
   const a = appt({ id: 'k1', start: '2026-04-01', end: '2027-03-31', payType: 'monthly', deptCode: '1050', budgetCode: '０２－０１－０６－１１５' });
   d.appointments.push(a);

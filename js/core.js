@@ -1947,10 +1947,23 @@
     }
     return { records, skipped, headerRow, map };
   }
-  /** 科目の表記：所属＋款項目コード（例：1050-20106000115）。款項目コードがなければ款項目表示 */
+  /** 所属名から部を除く（例：総務部総務課 → 総務課）。部だけの所属はそのまま */
+  function deptShort(name) {
+    const s = String(name || '').trim();
+    const m = s.match(/^[^部]+部(.+)$/);
+    return m ? m[1] : s;
+  }
+  /** 科目の表記：所属（課）＋款項目コード（例：総務課-20106000115）。款項目コードがなければ款項目表示 */
   function kamokuKey(k) {
     const code = String(k.code || '').trim() || String(k.display || '').trim();
-    return k.deptCode ? `${String(k.deptCode).trim()}-${code}` : code;
+    const dept = deptShort(k.dept) || String(k.deptCode || '').trim();
+    return dept ? `${dept}-${code}` : code;
+  }
+  /** 突き合わせ用：区切り（ハイフン・空白）を除いた表記 */
+  function kamokuMatchKeys(k) {
+    const code = String(k.code || '').trim() || String(k.display || '').trim();
+    const strip = (v) => normBudget(v).replace(/-/g, '');
+    return [deptShort(k.dept), k.dept, k.deptCode].filter(Boolean).map((d) => strip(`${d}${code}`));
   }
   function kamokuOfFy(data, fy) {
     return (data.kamoku || []).filter((k) => Number(k.fy) === Number(fy));
@@ -1958,6 +1971,7 @@
   /** 同じ科目か（IDが同じ、またはIDがなく所属・会計・款項目表示が同じ） */
   function sameKamoku(a, b) {
     if (a.srcId && b.srcId) return String(a.srcId) === String(b.srcId);
+    if (a.deptCode && b.deptCode && String(a.deptCode) !== String(b.deptCode)) return false;
     return normBudget(kamokuKey(a)) === normBudget(kamokuKey(b));
   }
   /** 取り込む（同じ科目は上書き、ないものは追加）。apply=false なら件数だけ数える */
@@ -1982,15 +1996,17 @@
     return importKamoku(data, toFy, list, true).add;
   }
   /**
-   * 任用の科目（任用の年度の科目一覧から、予算科目＝「所属＋款項目コード」で探す）。
-   * 以前の入力（款項目コード・款項目表示だけ）も読み、そのときは所属CDが合うものを選ぶ。
+   * 任用の科目（任用の年度の科目一覧から、予算科目＝「所属（課）＋款項目コード」で探す）。
+   * 所属を部から書いたもの・所属CDで書いたもの、以前の入力（款項目コード・款項目表示だけ）も読み、
+   * 款項目だけのときは所属CDが合うものを選ぶ。
    */
   function kamokuOfAppointment(data, appt) {
     const key = normBudget(appt.budgetCode);
     if (!key || !appt.start) return null;
     const digits = key.replace(/\D/g, '');
     const all = kamokuOfFy(data, fiscalYearOf(appt.start));
-    const full = all.find((k) => normBudget(kamokuKey(k)) === key || (digits && kamokuKey(k).replace(/\D/g, '') === digits));
+    const stripped = key.replace(/-/g, '');
+    const full = all.find((k) => kamokuMatchKeys(k).includes(stripped));
     if (full) return full;
     const list = all.filter((k) => normBudget(k.code) === key || normBudget(k.display) === key
       || (digits && (String(k.code).replace(/\D/g, '') === digits || String(k.display).replace(/\D/g, '') === digits)));
@@ -2023,7 +2039,7 @@
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
-    KAMOKU_FIELDS, normBudget, kamokuKey, parseKamoku, kamokuOfFy, importKamoku, copyKamoku, kamokuOfAppointment, appointmentsOfKamoku, kamokuApplies,
+    KAMOKU_FIELDS, normBudget, deptShort, kamokuKey, parseKamoku, kamokuOfFy, importKamoku, copyKamoku, kamokuOfAppointment, appointmentsOfKamoku, kamokuApplies,
     YEAR_END_NOTICES, YEAR_END_SRC, insuranceNa, isClosedDay, toBusinessDay, yearEndNoticeDates, yearEndStepDate, ensureYearEnd, yearEndTargets, yearEndView, yearEndState,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };
