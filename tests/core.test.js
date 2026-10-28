@@ -749,13 +749,18 @@ test('科目：会計・款項目の一覧を年度ごとに取り込み、任�
   const res = C.parseKamoku(rows);
   assert.ifError(res.error);
   assert.strictEqual(res.headerRow, 1);
-  assert.deepStrictEqual(res.records.map((r) => [r.srcId, r.deptCode, r.zaimuName, r.account, r.display, r.name, r.flag]),
-    [['9001', '1050', '架空部架空課', '一般', '02-01-06-115', '架空課予算', '変・複'], ['9002', '2100', '架空部福祉課', '国保事業', '05-01-02-350', '福祉課予算', '']]);
+  assert.deepStrictEqual(res.records.map((r) => [r.srcId, r.deptCode, r.zaimuName, r.account, r.code, r.name, C.kamokuKey(r)]),
+    [['9001', '1050', '架空部架空課', '一般', '20106000115', '架空課予算', '1050-20106000115'], ['9002', '2100', '架空部福祉課', '国保事業', '50102000350', '福祉課予算', '2100-50102000350']]);
+  assert.strictEqual('flag' in res.records[0], false); // R列（変・複）は読まない
   const d = baseData();
   assert.deepStrictEqual(C.importKamoku(d, 2026, res.records), { add: 2, update: 0 });
   assert.deepStrictEqual(C.importKamoku(d, 2026, res.records), { add: 0, update: 2 }); // 同じIDは上書き
   assert.strictEqual(C.kamokuOfFy(d, 2025).length, 0); // 年度ごと
-  // 予算科目の表記ゆれ（全角・ハイフン）を吸収して突き合わせる
+  // 予算科目＝所属＋款項目コード
+  const b0 = appt({ id: 'k0', start: '2026-04-01', end: '2027-03-31', payType: 'monthly', deptCode: '1050', budgetCode: '1050-20106000115' });
+  assert.strictEqual(C.kamokuOfAppointment(d, b0).name, '架空課予算');
+  assert.strictEqual(C.kamokuOfAppointment(d, { ...b0, budgetCode: '１０５０　２０１０６０００１１５' }).name, '架空課予算');
+  // 以前の入力（款項目表示だけ）も読める。表記ゆれ（全角・ハイフン）も吸収する
   const a = appt({ id: 'k1', start: '2026-04-01', end: '2027-03-31', payType: 'monthly', deptCode: '1050', budgetCode: '０２－０１－０６－１１５' });
   d.appointments.push(a);
   assert.strictEqual(C.kamokuOfAppointment(d, a).name, '架空課予算');
@@ -770,4 +775,28 @@ test('科目：会計・款項目の一覧を年度ごとに取り込み、任�
   assert.strictEqual(C.copyKamoku(d, 2026, 2027), 2);
   assert.strictEqual(C.copyKamoku(d, 2026, 2027), 0);
   assert.deepStrictEqual(C.normalizeData({}).kamoku, []);
+});
+
+test('切替の手続き：共済（短期）→共済、雇用保険→退手は切替日の前月10日から知らせる', () => {
+  assert.strictEqual(C.switchNoticeFrom('2026-07-01'), '2026-06-10');
+  assert.strictEqual(C.switchNoticeFrom('2027-01-01'), '2026-12-10');
+  const d = baseData();
+  // R8.1.1からフルタイム → 雇用保険→退手 R8.7.1、共済（短期）→共済 R9.1.1
+  d.appointments.push(appt({ id: 'f1', type: 'full', payType: 'monthly', weeklyHours: 38.75, start: '2026-01-01', end: '2026-03-31' }));
+  d.appointments.push(appt({ id: 'f2', type: 'full', payType: 'monthly', weeklyHours: 38.75, start: '2026-04-01', end: '2027-03-31', recruitMethod: 'reappoint' }));
+  assert.deepStrictEqual(C.switchAlerts(d, '2026-06-09', d.settings), []);
+  const a = C.switchAlerts(d, '2026-06-10', d.settings);
+  assert.deepStrictEqual(a.map((x) => [x.kind, x.date, x.from, x.daysLeft]), [['taishu', '2026-07-01', '2026-06-10', 21]]);
+  // 切替日を過ぎても手続き済みにするまで出す
+  assert.strictEqual(C.switchAlerts(d, '2026-07-05', d.settings)[0].overdue, true);
+  d.switchDone[a[0].key] = '2026-06-15';
+  assert.deepStrictEqual(C.switchAlerts(d, '2026-07-05', d.settings), []);
+  assert.deepStrictEqual(C.switchAlerts(d, '2026-12-10', d.settings).map((x) => [x.kind, x.date]), [['kyosai', '2027-01-01']]);
+  // 切替日から60日を過ぎたら出さない
+  delete d.switchDone[a[0].key];
+  assert.strictEqual(C.switchAlerts(d, '2026-08-30', d.settings).length, 1);
+  assert.strictEqual(C.switchAlerts(d, '2026-09-01', d.settings).length, 0);
+  // 切替日以降の任用がすでに「退手」なら済んでいる
+  d.appointments.push(appt({ id: 'f3', type: 'full', payType: 'monthly', weeklyHours: 38.75, start: '2026-07-01', end: '2027-03-31', empIns: '退手' }));
+  assert.strictEqual(C.switchAlerts(d, '2026-07-05', d.settings).length, 0);
 });

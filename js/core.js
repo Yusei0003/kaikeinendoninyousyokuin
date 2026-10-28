@@ -153,6 +153,7 @@
       recruitDecisions: {},
       legalTexts: {},
       yearEnd: {},
+      switchDone: {},
       settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
       lastBackupAt: null,
     };
@@ -176,6 +177,7 @@
     out.settings = { ...base.settings, ...(raw.settings || {}) };
     out.legalTexts = { ...(raw.legalTexts || {}) };
     if (!raw.yearEnd || typeof raw.yearEnd !== 'object') out.yearEnd = {};
+    if (!raw.switchDone || typeof raw.switchDone !== 'object') out.switchDone = {};
     return out;
   }
 
@@ -473,6 +475,45 @@
       taishu: addMonthsISO(ss.date, Number(settings.taishuMonths)),
       kyosai: addMonthsISO(ss.date, Number(settings.kyosaiMonths)),
     };
+  }
+  /** 切替の手続きを始める日：切替日の前月10日（例：7/1切替 → 6/10から） */
+  function switchNoticeFrom(date) {
+    const d = parseISO(date);
+    return toISO(new Date(d.getFullYear(), d.getMonth() - 1, 10));
+  }
+  const SWITCH_LABEL = {
+    kyosai: { before: '共済（短期）', after: '共済', basis: '市マニュアル第Ⅶ章1（フルタイム12月経過）' },
+    taishu: { before: '雇用保険', after: '退職手当', basis: '市マニュアル第Ⅶ章2（フルタイム6月経過）' },
+  };
+  /**
+   * 手続きを始める時期に来ている切替（共済（短期）→共済、雇用保険→退手）。
+   * 切替日の前月10日から表示し、「手続き済み」にするまで出し続ける（切替日を過ぎたら overdue）。
+   * 同じ職員・同じ切替は1件にまとめる。
+   */
+  function switchAlerts(data, today, settings) {
+    const out = new Map();
+    const done = data.switchDone || {};
+    for (const a of data.appointments) {
+      if (a.status === 'canceled' || !a.start || a.type !== 'full') continue;
+      const sw = fullTimeSwitchDates(data, a, settings);
+      if (!sw) continue;
+      for (const kind of ['kyosai', 'taishu']) {
+        const date = sw[kind];
+        // その任用の期間中（任期満了の翌日まで）に来る切替だけ
+        if (date <= a.start || date > addDaysISO(a.end, 1)) continue;
+        const key = `${a.staffId}|${kind}|${date}`;
+        const from = switchNoticeFrom(date);
+        if (today < from || out.has(key) || done[key]) continue;
+        // 切替日から60日を過ぎたものは出さない
+        if (diffDays(date, today) > 60) continue;
+        // 切替日以降に始まる任用で、すでに切替後（共済・退手）になっていれば済んでいる
+        const after = kind === 'kyosai' ? (x) => x.socialIns === '共済' : (x) => x.empIns === '退手';
+        if (data.appointments.some((x) => x.staffId === a.staffId && x.status !== 'canceled' && x.start >= date && after(x))) continue;
+        out.set(key, { key, kind, date, from, staffId: a.staffId, appt: a, ...SWITCH_LABEL[kind],
+          daysLeft: diffDays(today, date), overdue: today >= date, estimated: sw.estimated });
+      }
+    }
+    return [...out.values()].sort((x, y) => x.date.localeCompare(y.date));
   }
   /** 任用開始日時点の社会保険の目安（市マニュアル第Ⅶ章1）。sure=false は要件確認が必要 */
   function suggestSocialIns(data, appt, settings) {
@@ -1862,7 +1903,7 @@
     ['srcId', 'ID'], ['deptCode', '所属'], ['dept', '所属名'], ['zaimuCode', '財務'], ['zaimuName', '財務名'],
     ['accountCode', '会計'], ['account', '会計名'], ['code', '款項目コード'], ['display', '款項目表示'], ['name', '款項目名'],
     ['subDept', 'サブ所属'], ['subAccount', 'サブ会計'], ['subKamoku', 'サブ科目'],
-    ['jicchoCode', '実調部門cd'], ['jicchoName', '実調部門名'], ['teiinCode', '定員部門cd'], ['teiinName', '定員部門名'], ['flag', '備考'],
+    ['jicchoCode', '実調部門cd'], ['jicchoName', '実調部門名'], ['teiinCode', '定員部門cd'], ['teiinName', '定員部門名'],
   ];
   /** 款項目表示・予算科目の表記ゆれをそろえる（全角・空白・ハイフンの種類） */
   function normBudget(s) {
@@ -1870,8 +1911,8 @@
   }
   /**
    * 「会計・款項目 アップロード」の一覧を読む。
-   * 見出し行は「款項目コード」か「款項目表示」がある行。「財務」の右隣の見出しのない列は財務の名称、
-   * 最後の見出しのない列（変・複など）は備考として読む。
+   * 見出し行は「款項目コード」か「款項目表示」がある行。「財務」の右隣の見出しのない列は財務の名称として読む。
+   * 最後の見出しのない列（変・複）は使わない。
    */
   function parseKamoku(rows) {
     const H = (v) => normalizeHeader(v);
@@ -1886,20 +1927,13 @@
     const names = {
       srcId: ['id'], deptCode: ['所属', '所属cd', '所属コード'], dept: ['所属名'], zaimuCode: ['財務'], accountCode: ['会計', '会計cd', '会計コード'], account: ['会計名'],
       code: ['款項目コード'], display: ['款項目表示'], name: ['款項目名'], subDept: ['サブ所属'], subAccount: ['サブ会計'], subKamoku: ['サブ科目'],
-      jicchoCode: ['実調部門cd'], jicchoName: ['実調部門名'], teiinCode: ['定員部門cd'], teiinName: ['定員部門名'], flag: ['備考'],
+      jicchoCode: ['実調部門cd'], jicchoName: ['実調部門名'], teiinCode: ['定員部門cd'], teiinName: ['定員部門名'],
     };
     for (const [key, list] of Object.entries(names)) {
       const i = hs.findIndex((h) => list.includes(h));
       if (i >= 0) map[key] = i;
     }
     if (map.zaimuCode !== undefined && !hs[map.zaimuCode + 1]) map.zaimuName = map.zaimuCode + 1;
-    if (map.flag === undefined) {
-      // 見出しのない最後の列にデータがあれば備考として読む
-      const width = Math.max(...rows.slice(headerRow + 1).map((r) => (r || []).length), hs.length);
-      for (let c = width - 1; c > (map.teiinName !== undefined ? map.teiinName : -1); c--) {
-        if (!hs[c] && c !== map.zaimuName && rows.slice(headerRow + 1).some((r) => r && r[c] != null && r[c] !== '')) { map.flag = c; break; }
-      }
-    }
     const records = [];
     const skipped = [];
     for (let r = headerRow + 1; r < rows.length; r++) {
@@ -1907,11 +1941,16 @@
       if (!row.some((c) => c != null && c !== '')) continue;
       const rec = {};
       for (const [key] of KAMOKU_FIELDS) rec[key] = map[key] === undefined ? '' : cellText(row[map[key]]);
-      if (!rec.display && !rec.code) { skipped.push({ row: r + 1, reason: '款項目コード・款項目表示が空欄' }); continue; }
+      if (!rec.code && !rec.display) { skipped.push({ row: r + 1, reason: '款項目コード・款項目表示が空欄' }); continue; }
       rec._row = r + 1;
       records.push(rec);
     }
     return { records, skipped, headerRow, map };
+  }
+  /** 科目の表記：所属＋款項目コード（例：1050-20106000115）。款項目コードがなければ款項目表示 */
+  function kamokuKey(k) {
+    const code = String(k.code || '').trim() || String(k.display || '').trim();
+    return k.deptCode ? `${String(k.deptCode).trim()}-${code}` : code;
   }
   function kamokuOfFy(data, fy) {
     return (data.kamoku || []).filter((k) => Number(k.fy) === Number(fy));
@@ -1919,8 +1958,7 @@
   /** 同じ科目か（IDが同じ、またはIDがなく所属・会計・款項目表示が同じ） */
   function sameKamoku(a, b) {
     if (a.srcId && b.srcId) return String(a.srcId) === String(b.srcId);
-    return String(a.deptCode) === String(b.deptCode) && String(a.accountCode || a.account) === String(b.accountCode || b.account)
-      && normBudget(a.display || a.code) === normBudget(b.display || b.code);
+    return normBudget(kamokuKey(a)) === normBudget(kamokuKey(b));
   }
   /** 取り込む（同じ科目は上書き、ないものは追加）。apply=false なら件数だけ数える */
   function importKamoku(data, fy, records, apply = true) {
@@ -1944,17 +1982,21 @@
     return importKamoku(data, toFy, list, true).add;
   }
   /**
-   * 任用の科目（任用の年度の科目一覧から、予算科目＝款項目表示またはコードで探す）。
-   * 同じ款項目が複数の所属・会計にあるときは、所属CD・会計が合うものを選ぶ。
+   * 任用の科目（任用の年度の科目一覧から、予算科目＝「所属＋款項目コード」で探す）。
+   * 以前の入力（款項目コード・款項目表示だけ）も読み、そのときは所属CDが合うものを選ぶ。
    */
   function kamokuOfAppointment(data, appt) {
     const key = normBudget(appt.budgetCode);
     if (!key || !appt.start) return null;
     const digits = key.replace(/\D/g, '');
-    const list = kamokuOfFy(data, fiscalYearOf(appt.start)).filter((k) => normBudget(k.display) === key || (digits && (String(k.code).replace(/\D/g, '') === digits || String(k.display).replace(/\D/g, '') === digits)));
+    const all = kamokuOfFy(data, fiscalYearOf(appt.start));
+    const full = all.find((k) => normBudget(kamokuKey(k)) === key || (digits && kamokuKey(k).replace(/\D/g, '') === digits));
+    if (full) return full;
+    const list = all.filter((k) => normBudget(k.code) === key || normBudget(k.display) === key
+      || (digits && (String(k.code).replace(/\D/g, '') === digits || String(k.display).replace(/\D/g, '') === digits)));
     if (!list.length) return null;
     const score = (k) => (String(k.deptCode) === String(appt.deptCode || '') ? 2 : 0) + (appt.account && (k.account === appt.account || String(k.accountCode) === String(appt.account)) ? 1 : 0);
-    return list.slice().sort((a, b) => score(b) - score(a))[0];
+    return list.slice().sort((x, y) => score(y) - score(x))[0];
   }
   /** 科目を登録する任用か（フルタイム・月額パートのみ。日額・時間額パートは対象外） */
   function kamokuApplies(appt) {
@@ -1973,7 +2015,7 @@
     emptyData, normalizeData,
     appointmentsOfStaff, probationEnd, consecutiveReappointCount, yearInServiceOf, publicRecruitFy, validateAppointment, validateRenewal,
     kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
-    fullTimeSwitchDates, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
+    fullTimeSwitchDates, switchNoticeFrom, switchAlerts, SWITCH_LABEL, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     parseMeibo, parseMeiboGender, isMeiboTarget, findStaffForMeibo, hasAppointmentOn,
     parseJinjiNinyo, parseNensu, employmentChainStart, employmentTimeline, kubunFromText, cycleYearFromStaff,
@@ -1981,7 +2023,7 @@
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
-    KAMOKU_FIELDS, normBudget, parseKamoku, kamokuOfFy, importKamoku, copyKamoku, kamokuOfAppointment, appointmentsOfKamoku, kamokuApplies,
+    KAMOKU_FIELDS, normBudget, kamokuKey, parseKamoku, kamokuOfFy, importKamoku, copyKamoku, kamokuOfAppointment, appointmentsOfKamoku, kamokuApplies,
     YEAR_END_NOTICES, YEAR_END_SRC, insuranceNa, isClosedDay, toBusinessDay, yearEndNoticeDates, yearEndStepDate, ensureYearEnd, yearEndTargets, yearEndView, yearEndState,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };
