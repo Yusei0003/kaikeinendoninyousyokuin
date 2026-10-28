@@ -1956,9 +1956,13 @@
     const score = (k) => (String(k.deptCode) === String(appt.deptCode || '') ? 2 : 0) + (appt.account && (k.account === appt.account || String(k.accountCode) === String(appt.account)) ? 1 : 0);
     return list.slice().sort((a, b) => score(b) - score(a))[0];
   }
+  /** 科目を登録する任用か（フルタイム・月額パートのみ。日額・時間額パートは対象外） */
+  function kamokuApplies(appt) {
+    return ['full', 'part_monthly'].includes(kubunOf(appt));
+  }
   /** 科目を使っている任用（その年度） */
   function appointmentsOfKamoku(data, k) {
-    return data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === Number(k.fy) && kamokuOfAppointment(data, a) === k);
+    return data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === Number(k.fy) && kamokuApplies(a) && kamokuOfAppointment(data, a) === k);
   }
 
   const api = {
@@ -1977,7 +1981,7 @@
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
-    KAMOKU_FIELDS, normBudget, parseKamoku, kamokuOfFy, importKamoku, copyKamoku, kamokuOfAppointment, appointmentsOfKamoku,
+    KAMOKU_FIELDS, normBudget, parseKamoku, kamokuOfFy, importKamoku, copyKamoku, kamokuOfAppointment, appointmentsOfKamoku, kamokuApplies,
     YEAR_END_NOTICES, YEAR_END_SRC, insuranceNa, isClosedDay, toBusinessDay, yearEndNoticeDates, yearEndStepDate, ensureYearEnd, yearEndTargets, yearEndView, yearEndState,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };

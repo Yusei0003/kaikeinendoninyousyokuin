@@ -590,7 +590,7 @@ function appointFields(fy = currentFy(), deptCode = '') {
     { key: 'dept', label: '所属名', required: true },
     { key: 'workplace', label: '就業場所' },
     { key: 'title', label: '業務内容', required: true, placeholder: '例：保育士、事務補助員' },
-    { key: 'kamokuSel', label: '科目（科目管理の一覧から選ぶ）', type: 'select', options: kamokuOptions(fy, deptCode), full: true, hint: '選ぶと会計・予算科目に入ります。一覧にない科目は会計・予算科目に手入力するか、科目管理で追加してください' },
+    { key: 'kamokuSel', label: '科目（科目管理の一覧から選ぶ）', type: 'select', options: kamokuOptions(fy, deptCode), full: true, hint: 'フルタイム・月額パートのみ登録します（日額・時間額パートは対象外）。選ぶと会計・予算科目に入ります。一覧にない科目は科目管理で追加してください' },
     { key: 'account', label: '会計' },
     { key: 'budgetCode', label: '予算科目', hint: '款項目表示（例：02-01-06-115）' },
     { type: 'heading', label: '任用期間・勤務時間' },
@@ -740,6 +740,15 @@ function openAppointForm(appt, preset = {}) {
   };
   document.getElementById('modal-form').addEventListener('change', refreshJudge);
   refreshJudge();
+  // 科目はフルタイム・月額パートのみ（日額・時間額パートは選べない）
+  const syncKamoku = () => {
+    const ok = ['full', 'part_monthly'].includes(document.getElementById('f-kubun').value);
+    ['f-kamokuSel', 'f-account', 'f-budgetCode'].forEach((id) => { document.getElementById(id).disabled = !ok; });
+    if (!ok) document.getElementById('f-kamokuSel').value = '';
+  };
+  document.getElementById('f-kubun').addEventListener('change', syncKamoku);
+  document.getElementById('f-weeklyHours').addEventListener('change', () => setTimeout(syncKamoku));
+  syncKamoku();
   // 科目を選んだら会計・予算科目（所属が空欄なら所属も）に入れる
   document.getElementById('f-kamokuSel').addEventListener('change', (e) => {
     const k = DATA.kamoku.find((x) => x.id === e.target.value);
@@ -2395,7 +2404,8 @@ function kamokuLabel(k) { return `${k.display || k.code} ${k.name || ''}`.trim()
 function errCell(v) { return /エラー/.test(v || '') ? `<span class="badge warn">${escapeHtml(v)}</span>` : escapeHtml(v); }
 /** 任用一覧の「科目」欄 */
 function kamokuCell(a) {
-  if (!a.budgetCode && !a.account) return '<span class="muted">-</span>';
+  if (!C.kamokuApplies(a)) return '<span class="muted">対象外</span>';
+  if (!a.budgetCode && !a.account) return a.status === 'canceled' ? '<span class="muted">-</span>' : '<span class="badge warn">科目未登録</span>';
   const k = C.kamokuOfAppointment(DATA, a);
   if (k) return `${escapeHtml(k.display || k.code)}<br><small>${escapeHtml(k.account)}／${escapeHtml(k.name)}</small>`;
   return `${escapeHtml(a.budgetCode)}${a.account ? `<br><small>${escapeHtml(a.account)}</small>` : ''}${a.budgetCode ? '<br><span class="badge warn">科目一覧にない</span>' : ''}`;
@@ -2413,13 +2423,16 @@ function renderKamoku() {
   const all = C.kamokuOfFy(DATA, fy).slice().sort((a, b) => String(a.deptCode).localeCompare(String(b.deptCode)) || String(a.display).localeCompare(String(b.display)));
   const rows = all.filter((k) => !q || C.KAMOKU_FIELDS.some(([f]) => String(k[f] || '').includes(q)));
   const used = new Map(all.map((k) => [k.id, C.appointmentsOfKamoku(DATA, k).length]));
-  const unmatched = DATA.appointments.filter((a) => a.status !== 'canceled' && a.start && C.fiscalYearOf(a.start) === fy && a.budgetCode && !C.kamokuOfAppointment(DATA, a));
+  const targets = DATA.appointments.filter((a) => a.status !== 'canceled' && a.start && C.fiscalYearOf(a.start) === fy && C.kamokuApplies(a));
+  const unmatched = targets.filter((a) => a.budgetCode && !C.kamokuOfAppointment(DATA, a));
+  const missing = targets.filter((a) => !a.budgetCode);
   document.getElementById('kamoku-title').textContent = `${fyShort(fy)}年度の科目（会計・款項目）`;
   document.getElementById('kamoku-summary').innerHTML = miniStats([
     ['登録している科目', `${all.length}件`],
     ['年度途中に追加', `${all.filter((k) => k.source === 'manual').length}件`],
     ['任用で使っている科目', `${[...used.values()].filter((n) => n).length}件`, 'ok'],
     ['科目一覧にない予算科目の任用', `${unmatched.length}件`, unmatched.length ? 'warn' : ''],
+    ['科目が未登録の任用', `${missing.length}件`, missing.length ? 'warn' : ''],
     ['エラーのある科目', `${all.filter((k) => C.KAMOKU_FIELDS.some(([f]) => /エラー/.test(k[f] || ''))).length}件`],
   ]);
   document.getElementById('kamoku-table').innerHTML = tableHtml(
@@ -2439,11 +2452,14 @@ function renderKamoku() {
     }),
     all.length ? '該当する科目はありません。' : `${C.fyLabel(fy)}の科目が登録されていません。年度始めに「Excelから取り込む」で科目の一覧を取り込むか、「前年度からコピー」してください。`,
   );
-  document.getElementById('kamoku-unmatched').innerHTML = unmatched.length ? `<h3>科目一覧にない予算科目の任用（${unmatched.length}件）</h3>
+  document.getElementById('kamoku-unmatched').innerHTML = (missing.length ? `<h3>科目が未登録の任用（${missing.length}件）</h3>
+    <p class="hint">フルタイム・月額パートの任用で、予算科目が入っていません。「任用を編集」で科目を選んでください。</p>
+    ${tableHtml(['氏名', '所属', '業務内容', '区分', ''], missing.map((a) => `<tr><td>${nameLink(a.staffId)}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td>
+      <td>${C.KUBUN_LABEL[C.kubunOf(a)]}</td><td class="actions"><button class="btn-small" data-km-appt="${a.id}">任用を編集</button></td></tr>`))}` : '') + (unmatched.length ? `<h3>科目一覧にない予算科目の任用（${unmatched.length}件）</h3>
     <p class="hint">任用の「予算科目」が、この年度の科目一覧の款項目表示（またはコード）と一致しません。科目を追加するか、任用の科目を選び直してください。</p>
     ${tableHtml(['氏名', '所属', '業務内容', '会計', '予算科目', ''], unmatched.map((a) => `<tr><td>${nameLink(a.staffId)}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td>
       <td>${escapeHtml(a.account)}</td><td>${escapeHtml(a.budgetCode)}</td>
-      <td class="actions"><button class="btn-small" data-km-appt="${a.id}">任用を編集</button><button class="btn-small" data-km-from="${a.id}">この科目を追加</button></td></tr>`))}` : '';
+      <td class="actions"><button class="btn-small" data-km-appt="${a.id}">任用を編集</button><button class="btn-small" data-km-from="${a.id}">この科目を追加</button></td></tr>`))}` : '');
   const root = document.getElementById('panel-kamoku');
   const find = (id) => DATA.kamoku.find((k) => k.id === id);
   root.querySelectorAll('[data-km-edit]').forEach((b) => (b.onclick = () => openKamokuForm(find(b.dataset.kmEdit))));

@@ -756,11 +756,16 @@ test('科目：会計・款項目の一覧を年度ごとに取り込み、任�
   assert.deepStrictEqual(C.importKamoku(d, 2026, res.records), { add: 0, update: 2 }); // 同じIDは上書き
   assert.strictEqual(C.kamokuOfFy(d, 2025).length, 0); // 年度ごと
   // 予算科目の表記ゆれ（全角・ハイフン）を吸収して突き合わせる
-  const a = appt({ id: 'k1', start: '2026-04-01', end: '2027-03-31', deptCode: '1050', budgetCode: '０２－０１－０６－１１５' });
+  const a = appt({ id: 'k1', start: '2026-04-01', end: '2027-03-31', payType: 'monthly', deptCode: '1050', budgetCode: '０２－０１－０６－１１５' });
   d.appointments.push(a);
   assert.strictEqual(C.kamokuOfAppointment(d, a).name, '架空課予算');
   assert.strictEqual(C.appointmentsOfKamoku(d, C.kamokuOfAppointment(d, a)).length, 1);
   assert.strictEqual(C.kamokuOfAppointment(d, { ...a, budgetCode: '99-99-99-999' }), null);
+  // 科目はフル・月額パートのみ
+  assert.strictEqual(C.kamokuApplies(a), true);
+  assert.strictEqual(C.kamokuApplies(C.applyKubun({ ...a }, 'full')), true);
+  assert.strictEqual(C.kamokuApplies(C.applyKubun({ ...a }, 'part_daily')), false);
+  assert.strictEqual(C.kamokuApplies(C.applyKubun({ ...a }, 'part_hourly')), false);
   // 前年度からコピー（同じ科目は写さない）
   assert.strictEqual(C.copyKamoku(d, 2026, 2027), 2);
   assert.strictEqual(C.copyKamoku(d, 2026, 2027), 0);
