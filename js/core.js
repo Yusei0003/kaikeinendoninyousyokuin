@@ -149,6 +149,7 @@
       exams: [],
       applicants: [],
       recruitPositions: [],
+      kamoku: [],
       recruitDecisions: {},
       legalTexts: {},
       yearEnd: {},
@@ -162,7 +163,7 @@
     if (!raw || typeof raw !== 'object') return base;
     const out = { ...base, ...raw };
     if (!raw.recruitDecisions || typeof raw.recruitDecisions !== 'object') out.recruitDecisions = {};
-    for (const k of ['staff', 'appointments', 'evaluations', 'exams', 'applicants', 'recruitPositions']) {
+    for (const k of ['staff', 'appointments', 'evaluations', 'exams', 'applicants', 'recruitPositions', 'kamoku']) {
       if (!Array.isArray(out[k])) out[k] = [];
     }
     // 会計年度任用職員以外（区分名が入っていて別の区分）の職員は扱わない
@@ -1851,6 +1852,115 @@
     });
   }
 
+  /* ------------------------------------------------------------
+   * 科目（会計・款項目）
+   * 年度始めに「会計・款項目 アップロード」の一覧を取り込み、年度途中の追加は手入力する。
+   * 任用の「会計」「予算科目」と款項目表示（またはコード）で突き合わせる。
+   * ------------------------------------------------------------ */
+  /** 科目の項目（キー, 見出し） */
+  const KAMOKU_FIELDS = [
+    ['srcId', 'ID'], ['deptCode', '所属'], ['dept', '所属名'], ['zaimuCode', '財務'], ['zaimuName', '財務名'],
+    ['accountCode', '会計'], ['account', '会計名'], ['code', '款項目コード'], ['display', '款項目表示'], ['name', '款項目名'],
+    ['subDept', 'サブ所属'], ['subAccount', 'サブ会計'], ['subKamoku', 'サブ科目'],
+    ['jicchoCode', '実調部門cd'], ['jicchoName', '実調部門名'], ['teiinCode', '定員部門cd'], ['teiinName', '定員部門名'], ['flag', '備考'],
+  ];
+  /** 款項目表示・予算科目の表記ゆれをそろえる（全角・空白・ハイフンの種類） */
+  function normBudget(s) {
+    return String(s == null ? '' : s).normalize('NFKC').replace(/[\s　]/g, '').replace(/[‐‑‒–—―−ー－]/g, '-');
+  }
+  /**
+   * 「会計・款項目 アップロード」の一覧を読む。
+   * 見出し行は「款項目コード」か「款項目表示」がある行。「財務」の右隣の見出しのない列は財務の名称、
+   * 最後の見出しのない列（変・複など）は備考として読む。
+   */
+  function parseKamoku(rows) {
+    const H = (v) => normalizeHeader(v);
+    let headerRow = -1;
+    for (let r = 0; r < Math.min(rows.length, 15); r++) {
+      const hs = (rows[r] || []).map(H);
+      if (hs.includes('款項目コード') || hs.includes('款項目表示')) { headerRow = r; break; }
+    }
+    if (headerRow < 0) return { records: [], skipped: [], headerRow, error: '「款項目コード」または「款項目表示」の見出しがある行が見つかりません。会計・款項目の一覧か確認してください。' };
+    const hs = (rows[headerRow] || []).map(H);
+    const map = {};
+    const names = {
+      srcId: ['id'], deptCode: ['所属', '所属cd', '所属コード'], dept: ['所属名'], zaimuCode: ['財務'], accountCode: ['会計', '会計cd', '会計コード'], account: ['会計名'],
+      code: ['款項目コード'], display: ['款項目表示'], name: ['款項目名'], subDept: ['サブ所属'], subAccount: ['サブ会計'], subKamoku: ['サブ科目'],
+      jicchoCode: ['実調部門cd'], jicchoName: ['実調部門名'], teiinCode: ['定員部門cd'], teiinName: ['定員部門名'], flag: ['備考'],
+    };
+    for (const [key, list] of Object.entries(names)) {
+      const i = hs.findIndex((h) => list.includes(h));
+      if (i >= 0) map[key] = i;
+    }
+    if (map.zaimuCode !== undefined && !hs[map.zaimuCode + 1]) map.zaimuName = map.zaimuCode + 1;
+    if (map.flag === undefined) {
+      // 見出しのない最後の列にデータがあれば備考として読む
+      const width = Math.max(...rows.slice(headerRow + 1).map((r) => (r || []).length), hs.length);
+      for (let c = width - 1; c > (map.teiinName !== undefined ? map.teiinName : -1); c--) {
+        if (!hs[c] && c !== map.zaimuName && rows.slice(headerRow + 1).some((r) => r && r[c] != null && r[c] !== '')) { map.flag = c; break; }
+      }
+    }
+    const records = [];
+    const skipped = [];
+    for (let r = headerRow + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+      if (!row.some((c) => c != null && c !== '')) continue;
+      const rec = {};
+      for (const [key] of KAMOKU_FIELDS) rec[key] = map[key] === undefined ? '' : cellText(row[map[key]]);
+      if (!rec.display && !rec.code) { skipped.push({ row: r + 1, reason: '款項目コード・款項目表示が空欄' }); continue; }
+      rec._row = r + 1;
+      records.push(rec);
+    }
+    return { records, skipped, headerRow, map };
+  }
+  function kamokuOfFy(data, fy) {
+    return (data.kamoku || []).filter((k) => Number(k.fy) === Number(fy));
+  }
+  /** 同じ科目か（IDが同じ、またはIDがなく所属・会計・款項目表示が同じ） */
+  function sameKamoku(a, b) {
+    if (a.srcId && b.srcId) return String(a.srcId) === String(b.srcId);
+    return String(a.deptCode) === String(b.deptCode) && String(a.accountCode || a.account) === String(b.accountCode || b.account)
+      && normBudget(a.display || a.code) === normBudget(b.display || b.code);
+  }
+  /** 取り込む（同じ科目は上書き、ないものは追加）。apply=false なら件数だけ数える */
+  function importKamoku(data, fy, records, apply = true) {
+    if (!Array.isArray(data.kamoku)) data.kamoku = [];
+    let add = 0;
+    let update = 0;
+    const now = toISO(new Date());
+    for (const r of records) {
+      const { _row, ...vals } = r;
+      const hit = kamokuOfFy(data, fy).find((k) => sameKamoku(k, vals));
+      if (hit) { update++; if (apply) Object.assign(hit, vals, { updatedAt: now }); } else {
+        add++;
+        if (apply) data.kamoku.push({ id: uid('km'), fy: Number(fy), ...vals, source: 'import', createdAt: now });
+      }
+    }
+    return { add, update };
+  }
+  /** 前年度などの科目を別の年度へ写す（同じ科目は写さない） */
+  function copyKamoku(data, fromFy, toFy) {
+    const list = kamokuOfFy(data, fromFy).map(({ id, fy, createdAt, updatedAt, source, ...rest }) => rest);
+    return importKamoku(data, toFy, list, true).add;
+  }
+  /**
+   * 任用の科目（任用の年度の科目一覧から、予算科目＝款項目表示またはコードで探す）。
+   * 同じ款項目が複数の所属・会計にあるときは、所属CD・会計が合うものを選ぶ。
+   */
+  function kamokuOfAppointment(data, appt) {
+    const key = normBudget(appt.budgetCode);
+    if (!key || !appt.start) return null;
+    const digits = key.replace(/\D/g, '');
+    const list = kamokuOfFy(data, fiscalYearOf(appt.start)).filter((k) => normBudget(k.display) === key || (digits && (String(k.code).replace(/\D/g, '') === digits || String(k.display).replace(/\D/g, '') === digits)));
+    if (!list.length) return null;
+    const score = (k) => (String(k.deptCode) === String(appt.deptCode || '') ? 2 : 0) + (appt.account && (k.account === appt.account || String(k.accountCode) === String(appt.account)) ? 1 : 0);
+    return list.slice().sort((a, b) => score(b) - score(a))[0];
+  }
+  /** 科目を使っている任用（その年度） */
+  function appointmentsOfKamoku(data, k) {
+    return data.appointments.filter((a) => a.status !== 'canceled' && a.start && fiscalYearOf(a.start) === Number(k.fy) && kamokuOfAppointment(data, a) === k);
+  }
+
   const api = {
     APPOINT_TYPE_LABEL, APPOINT_TYPE_SHORT, RECRUIT_LABEL, PAY_TYPE_LABEL, EXAM_METHOD_LABEL,
     RESULT_LABEL, RECOMMEND_LABEL, WISH_LABEL, STATUS_LABEL, DEFAULT_SETTINGS, IMPORT_SCHEMAS, KUBUN_LABEL,
@@ -1867,6 +1977,7 @@
     evaluationFor, hasGrades, suggestOverall, missingEvaluations, buildNextYearPlan,
     RETIRE_LABEL, CONTINUATION_LABEL, latestAppointmentsOfFy, continuationStatus, recruitNeeds, careerOf, fiscalYearSummary, fiscalYearsInData,
     applicantTotal, rankApplicants,
+    KAMOKU_FIELDS, normBudget, parseKamoku, kamokuOfFy, importKamoku, copyKamoku, kamokuOfAppointment, appointmentsOfKamoku,
     YEAR_END_NOTICES, YEAR_END_SRC, insuranceNa, isClosedDay, toBusinessDay, yearEndNoticeDates, yearEndStepDate, ensureYearEnd, yearEndTargets, yearEndView, yearEndState,
     normalizeHeader, detectColumns, excelValueToISO, parseFiscalYear, parseGender, rowsToRecords, findStaff,
   };

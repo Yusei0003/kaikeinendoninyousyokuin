@@ -608,3 +608,8 @@ td.center { text-align: center; }
 #yearend-overview td:nth-child(6) { min-width: 200px; }
 .ye-body.ye-body-wide { grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.6fr); }
 @media (max-width: 1000px) { .ye-body.ye-body-wide { grid-template-columns: 1fr; } }
+
+/* 科目管理 */
+td.kamoku-cell { white-space: nowrap; font-size: 12px; }
+#kamoku-preview .import-summary { margin-bottom: 14px; }
+#kamoku-unmatched h3 { margin-top: 20px; }

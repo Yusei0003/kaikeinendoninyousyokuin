@@ -31,6 +31,7 @@
   <span class="tab-sep" aria-hidden="true"></span>
   <button class="tab-btn" data-tab="eval">人事評価</button>
   <button class="tab-btn" data-tab="exam">採用試験</button>
+  <button class="tab-btn" data-tab="kamoku">科目管理</button>
   <button class="tab-btn" data-tab="home">状況・手続き</button>
   <button class="tab-btn" data-tab="import">Excel取込</button>
   <button class="tab-btn" data-tab="law">根拠法令</button>
@@ -219,6 +220,27 @@
     </div>
   </section>
 
+  <!-- ============ 科目管理 ============ -->
+  <section id="panel-kamoku" class="tab-panel">
+    <div class="card">
+      <div class="card-header-row">
+        <h2 id="kamoku-title">科目（会計・款項目）</h2>
+        <div class="row-actions">
+          <input type="search" id="kamoku-search" placeholder="所属・款項目・会計で検索">
+          <label class="btn-primary file-btn">Excelから取り込む<input type="file" id="kamoku-file" accept=".xlsx,.xls,.csv" hidden></label>
+          <button class="btn-secondary" id="btn-kamoku-copy">前年度からコピー</button>
+          <button class="btn-secondary" id="btn-kamoku-add">科目を追加（年度途中）</button>
+          <button class="btn-secondary" id="btn-kamoku-export">Excelに書き出す</button>
+        </div>
+      </div>
+      <p class="hint">年度ごとに科目（会計・款項目）を管理します。<strong>年度始めに「会計・款項目 アップロード」の一覧を取り込み</strong>、年度途中に増えた科目は「科目を追加」で登録します。取り込むときに何年度の科目かを選べます。任用の「予算科目」と款項目表示（またはコード）で突き合わせ、<strong>任用一覧の「科目」欄</strong>に会計・款項目名を表示します。任用の入力画面では、この一覧から科目を選べます。</p>
+      <div id="kamoku-preview"></div>
+      <div id="kamoku-summary" class="mini-stats"></div>
+      <div id="kamoku-table"></div>
+      <div id="kamoku-unmatched"></div>
+    </div>
+  </section>
+
   <!-- ============ 人事評価 ============ -->
   <section id="panel-eval" class="tab-panel">
     <div class="card">
@@ -272,6 +294,10 @@
             <td>氏名、任用期間（または区分）</td>
             <td>任用伺い、会計年度、職員番号、区分、ﾌﾘｶﾞﾅ、所属CD、所属名、会計、予算科目、就業場所、業務内容、勤務時間/週、年休（日数）、基礎額、給料・報酬（＋右隣の金額）、給料・報酬支給日、期末手当支給の有無、通勤手当支給日、社会保険、健保→共済切替時期、雇保/退手、雇保→退手切替時期、保育士特定登録取消者管理システム、備考</td>
             <td>年度ごとの任用（任用一覧タブ）</td></tr>
+          <tr><td><strong>科目（会計・款項目）</strong><br><small>年度始め（年度途中の追加は科目管理で手入力）</small></td><td>会計・款項目 アップロードの一覧</td>
+            <td>款項目表示（または款項目コード）、款項目名</td>
+            <td>ID、所属、所属名、財務（＋右隣の名称）、会計、会計名、サブ所属、サブ会計、サブ科目、実調部門cd、実調部門名、定員部門cd、定員部門名、最後の見出しのない列（変・複など。備考として読む）</td>
+            <td>取込時に選んだ年度の科目一覧（科目管理タブ）。任用の予算科目と突き合わせて任用一覧の「科目」欄に表示</td></tr>
           <tr><td>職員台帳・任用・人事評価（汎用）</td><td>任意のExcel</td><td>「取込用のひな形」を参照</td><td></td><td>それぞれの台帳</td></tr>
         </tbody></table></div>
       <p class="hint"><strong>初めて使うとき</strong>は、①過去の任用一覧（古い年度から）→ ②職員名簿 → ③任用（人事システム）→ ④年数確認データ の順がおすすめです（どの順でも職員番号・氏名で照合されます）。</p>
@@ -283,6 +309,7 @@
             <option value="meibo">職員名簿（人事システムの出力）</option>
             <option value="jinjiNinyo">任用（人事システム：ﾆ 任用の検索結果）</option>
             <option value="nensu">年数確認データ（3年周期の何年目か）</option>
+            <option value="kamoku">科目（会計・款項目 アップロード）</option>
             <option value="staff">職員台帳</option>
             <option value="appointments">任用（任期・所属・報酬など）</option>
             <option value="evaluations">人事評価</option>

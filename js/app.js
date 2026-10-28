@@ -576,7 +576,7 @@ const INS_EMP_OPTIONS = [['', '未記入'], ['雇用保険', '雇用保険'], ['
 const UMU_OPTIONS = [['', '未記入'], ['有', '有'], ['無', '無']];
 const CHECK_OPTIONS = [['', '未記入'], ['済', '済'], ['未', '未'], ['-', '-（対象外）']];
 
-function appointFields() {
+function appointFields(fy = currentFy(), deptCode = '') {
   return [
     { type: 'heading', label: '職員・任用' },
     { key: 'staffId', label: '職員', type: 'select', options: staffOptions(), required: true },
@@ -590,8 +590,9 @@ function appointFields() {
     { key: 'dept', label: '所属名', required: true },
     { key: 'workplace', label: '就業場所' },
     { key: 'title', label: '業務内容', required: true, placeholder: '例：保育士、事務補助員' },
+    { key: 'kamokuSel', label: '科目（科目管理の一覧から選ぶ）', type: 'select', options: kamokuOptions(fy, deptCode), full: true, hint: '選ぶと会計・予算科目に入ります。一覧にない科目は会計・予算科目に手入力するか、科目管理で追加してください' },
     { key: 'account', label: '会計' },
-    { key: 'budgetCode', label: '予算科目' },
+    { key: 'budgetCode', label: '予算科目', hint: '款項目表示（例：02-01-06-115）' },
     { type: 'heading', label: '任用期間・勤務時間' },
     { key: 'kubun', label: '区分', type: 'select', options: KUBUN_OPTIONS },
     { key: 'start', label: '任用期間（開始）', type: 'date', required: true },
@@ -626,6 +627,7 @@ function appointFromForm(v, base) {
   rec.fiscalYear = v.start ? C.fiscalYearOf(v.start) : '';
   rec.status = v.canceled ? 'canceled' : '';
   delete rec.canceled;
+  delete rec.kamokuSel;
   return rec;
 }
 /** 市マニュアルに基づく判定結果（フォーム下部に表示） */
@@ -685,6 +687,8 @@ function openAppointForm(appt, preset = {}) {
   const values = appt ? { ...appt, kubun: C.kubunOf(appt), canceled: appt.status === 'canceled' } : {
     recruitMethod: 'public', kubun: 'part_monthly', start: C.fiscalYearStart(fy), end: C.fiscalYearEnd(fy), ...presetValues,
   };
+  const formFy = values.start ? C.fiscalYearOf(values.start) : fy;
+  values.kamokuSel = (C.kamokuOfAppointment(DATA, values) || {}).id || '';
   const trySave = (v, force) => {
     const rec = appointFromForm(v, appt);
     const issues = C.validateAppointment(rec, DATA, DATA.settings);
@@ -702,7 +706,7 @@ function openAppointForm(appt, preset = {}) {
     showToast(isNew ? '任用を登録しました。' : '任用を更新しました。');
     return undefined;
   };
-  const form = openForm(isNew ? '任用を登録' : '任用を編集', appointFields(), values, (v) => {
+  const form = openForm(isNew ? '任用を登録' : '任用を編集', appointFields(formFy, values.deptCode), values, (v) => {
     const res = trySave(v, false);
     if (typeof res === 'string') {
       setTimeout(() => {
@@ -736,6 +740,15 @@ function openAppointForm(appt, preset = {}) {
   };
   document.getElementById('modal-form').addEventListener('change', refreshJudge);
   refreshJudge();
+  // 科目を選んだら会計・予算科目（所属が空欄なら所属も）に入れる
+  document.getElementById('f-kamokuSel').addEventListener('change', (e) => {
+    const k = DATA.kamoku.find((x) => x.id === e.target.value);
+    if (!k) return;
+    document.getElementById('f-account').value = k.account || '';
+    document.getElementById('f-budgetCode').value = k.display || k.code || '';
+    if (!document.getElementById('f-deptCode').value) document.getElementById('f-deptCode').value = k.deptCode || '';
+    if (!document.getElementById('f-dept').value) document.getElementById('f-dept').value = k.dept || '';
+  });
   // 勤務時間38.75ならフルに合わせる
   const hoursEl = document.getElementById('f-weeklyHours');
   hoursEl.addEventListener('change', () => {
@@ -775,7 +788,8 @@ function filteredAppointments() {
     .map((a) => ({ a, status: C.appointmentStatus(a, t), issues: a.status === 'canceled' ? [] : C.validateAppointment(a, DATA, DATA.settings) }))
     .filter((x) => !st || x.status === st)
     .filter((x) => !issueOnly || x.issues.length)
-    .filter((x) => !q || [staffName(x.a.staffId), (staffById(x.a.staffId) || {}).number, x.a.dept, x.a.workplace, x.a.title].some((s) => String(s || '').includes(q)))
+    .filter((x) => !q || [staffName(x.a.staffId), (staffById(x.a.staffId) || {}).number, x.a.dept, x.a.workplace, x.a.title, x.a.account, x.a.budgetCode,
+      (C.kamokuOfAppointment(DATA, x.a) || {}).name, (C.kamokuOfAppointment(DATA, x.a) || {}).display].some((s) => String(s || '').includes(q)))
     .sort((x, y) => String(x.a.deptCode || '').localeCompare(String(y.a.deptCode || '')) || String(x.a.dept).localeCompare(String(y.a.dept), 'ja')
       || String(staffName(x.a.staffId)).localeCompare(staffName(y.a.staffId), 'ja'));
 }
@@ -798,7 +812,7 @@ function renderAppointments() {
   const rows = filteredAppointments();
   const dash = (v) => (v === '' || v == null ? '<span class="muted">-</span>' : escapeHtml(v));
   document.getElementById('appoint-table').innerHTML = tableHtml(
-    ['伺い', '年目', '公募', '勤続', '職員番号', '区分', '氏名', '所属', '業務内容', '任用期間', '時間/週', '年休', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手', '保育士確認', '状態', '点検', ''],
+    ['伺い', '年目', '公募', '勤続', '職員番号', '区分', '氏名', '所属', '業務内容', '科目', '任用期間', '時間/週', '年休', '基礎額', '給料・報酬', '期末', '社会保険', '雇保/退手', '保育士確認', '状態', '点検', ''],
     rows.map(({ a, status, issues }) => {
       const s = staffById(a.staffId) || {};
       return `<tr class="${status === 'canceled' ? 'row-muted' : issues.some((i) => i.level === 'error') ? 'row-error' : issues.length ? 'row-warning' : ''}">
@@ -811,6 +825,7 @@ function renderAppointments() {
       <td>${nameLink(a.staffId)}${s.kana ? `<br><small class="muted">${escapeHtml(s.kana)}</small>` : ''}</td>
       <td>${escapeHtml(a.dept)}${a.workplace && a.workplace !== a.dept ? `<br><small>${escapeHtml(a.workplace)}</small>` : ''}</td>
       <td>${escapeHtml(a.title)}</td>
+      <td class="kamoku-cell">${kamokuCell(a)}</td>
       <td>${C.toWarekiShort(a.start)}～${C.toWarekiShort(a.end)}${(a.renewals || []).length ? `<br><small>更新${a.renewals.length}回</small>` : ''}</td>
       <td>${C.hoursOf(a) != null ? C.hoursOf(a) : dash(a.hoursText)}</td>
       <td>${dash(a.annualLeave)}</td>
@@ -1149,7 +1164,8 @@ async function onImportFile() {
     if (withData) sel.value = withData;
     const head = (sheetRows(wb.Sheets[sel.value]).slice(0, 10) || []).map((r) => (r || []).map((c) => String(c == null ? '' : c).normalize('NFKC').replace(/\s/g, '')));
     const has = (h) => head.some((r) => r.includes(h));
-    if (has('氏名') && has('区分名') && has('採用日')) document.getElementById('import-kind').value = 'meibo';
+    if (has('款項目コード') || has('款項目表示')) document.getElementById('import-kind').value = 'kamoku';
+    else if (has('氏名') && has('区分名') && has('採用日')) document.getElementById('import-kind').value = 'meibo';
     else if (has('氏名') && has('開始日') && has('終了日')) document.getElementById('import-kind').value = 'jinjiNinyo';
     else if (has('氏名') && head.some((r) => r.some((c) => c.includes('任用年数')))) document.getElementById('import-kind').value = 'nensu';
     else if (has('氏名') && has('任用期間')) document.getElementById('import-kind').value = 'ninyoIchiran';
@@ -1167,6 +1183,12 @@ function renderImportPreview() {
   if (kind === 'meibo') { renderMeiboPreview(box, ws); return; }
   if (kind === 'jinjiNinyo') { renderJinjiPreview(box, ws); return; }
   if (kind === 'nensu') { renderNensuPreview(box, ws); return; }
+  if (kind === 'kamoku') {
+    box.innerHTML = `<p class="hint">科目（会計・款項目）の一覧です。「科目管理」タブで、何年度の科目として取り込むかを選んで取り込みます。</p>
+      <div class="row-actions"><button class="btn-primary" id="btn-import-kamoku">科目管理で取込内容を確認する</button></div>`;
+    document.getElementById('btn-import-kamoku').onclick = () => startKamokuImport(sheetRows(ws), importState.fileName);
+    return;
+  }
   const res = C.rowsToRecords(sheetRows(ws), kind, DATA.settings);
   importState.result = res;
   importState.kind = kind;
@@ -2365,6 +2387,164 @@ function exportYearEnd() {
 }
 
 /* ------------------------------------------------------------
+ * 科目管理（会計・款項目）
+ * ------------------------------------------------------------ */
+const KAMOKU_LABEL = Object.fromEntries(C.KAMOKU_FIELDS);
+let kamokuImport = null; // 取込確認中のデータ { records, skipped, fy, fileName }
+function kamokuLabel(k) { return `${k.display || k.code} ${k.name || ''}`.trim(); }
+function errCell(v) { return /エラー/.test(v || '') ? `<span class="badge warn">${escapeHtml(v)}</span>` : escapeHtml(v); }
+/** 任用一覧の「科目」欄 */
+function kamokuCell(a) {
+  if (!a.budgetCode && !a.account) return '<span class="muted">-</span>';
+  const k = C.kamokuOfAppointment(DATA, a);
+  if (k) return `${escapeHtml(k.display || k.code)}<br><small>${escapeHtml(k.account)}／${escapeHtml(k.name)}</small>`;
+  return `${escapeHtml(a.budgetCode)}${a.account ? `<br><small>${escapeHtml(a.account)}</small>` : ''}${a.budgetCode ? '<br><span class="badge warn">科目一覧にない</span>' : ''}`;
+}
+/** 任用の入力画面の科目の選択肢（同じ所属CDの科目を先に並べる） */
+function kamokuOptions(fy, deptCode) {
+  const list = C.kamokuOfFy(DATA, fy).slice().sort((a, b) => (String(b.deptCode) === String(deptCode || '')) - (String(a.deptCode) === String(deptCode || ''))
+    || String(a.deptCode).localeCompare(String(b.deptCode)) || String(a.display).localeCompare(String(b.display)));
+  return [['', list.length ? '（選ばない・手入力）' : `${C.fyLabel(fy)}の科目が未登録です（科目管理で登録）`],
+    ...list.map((k) => [k.id, `${kamokuLabel(k)}（${k.account}／${k.dept}）`])];
+}
+function renderKamoku() {
+  const fy = currentFy();
+  const q = document.getElementById('kamoku-search').value.trim();
+  const all = C.kamokuOfFy(DATA, fy).slice().sort((a, b) => String(a.deptCode).localeCompare(String(b.deptCode)) || String(a.display).localeCompare(String(b.display)));
+  const rows = all.filter((k) => !q || C.KAMOKU_FIELDS.some(([f]) => String(k[f] || '').includes(q)));
+  const used = new Map(all.map((k) => [k.id, C.appointmentsOfKamoku(DATA, k).length]));
+  const unmatched = DATA.appointments.filter((a) => a.status !== 'canceled' && a.start && C.fiscalYearOf(a.start) === fy && a.budgetCode && !C.kamokuOfAppointment(DATA, a));
+  document.getElementById('kamoku-title').textContent = `${fyShort(fy)}年度の科目（会計・款項目）`;
+  document.getElementById('kamoku-summary').innerHTML = miniStats([
+    ['登録している科目', `${all.length}件`],
+    ['年度途中に追加', `${all.filter((k) => k.source === 'manual').length}件`],
+    ['任用で使っている科目', `${[...used.values()].filter((n) => n).length}件`, 'ok'],
+    ['科目一覧にない予算科目の任用', `${unmatched.length}件`, unmatched.length ? 'warn' : ''],
+    ['エラーのある科目', `${all.filter((k) => C.KAMOKU_FIELDS.some(([f]) => /エラー/.test(k[f] || ''))).length}件`],
+  ]);
+  document.getElementById('kamoku-table').innerHTML = tableHtml(
+    ['ID', '所属', '会計', '款項目表示', '款項目名', '実調部門', '定員部門', '備考', '任用', ''],
+    rows.map((k) => {
+      const sub = [k.subDept, k.subAccount, k.subKamoku].some((v, i) => v && v !== [k.deptCode, k.accountCode, k.display][i]);
+      return `<tr>
+      <td>${escapeHtml(k.srcId)}</td><td>${escapeHtml(k.deptCode)}<br><small>${escapeHtml(k.dept)}</small></td>
+      <td>${escapeHtml(k.accountCode)} ${escapeHtml(k.account)}</td>
+      <td><strong>${escapeHtml(k.display)}</strong>${k.code ? `<br><small class="muted">${escapeHtml(k.code)}</small>` : ''}</td>
+      <td>${escapeHtml(k.name)}${sub ? `<br><small class="muted">サブ：${escapeHtml(k.subDept)}／${escapeHtml(k.subAccount)}／${escapeHtml(k.subKamoku)}</small>` : ''}
+        ${k.source === 'manual' ? `<br><span class="badge st-info">年度途中に追加 ${yeDate(k.createdAt)}</span>` : ''}</td>
+      <td>${escapeHtml(k.jicchoCode)} ${errCell(k.jicchoName)}</td><td>${escapeHtml(k.teiinCode)} ${errCell(k.teiinName)}</td>
+      <td>${escapeHtml(k.flag)}</td>
+      <td>${used.get(k.id) ? `<button class="btn-small" data-km-show="${k.id}">${used.get(k.id)}件を見る</button>` : '<span class="muted">-</span>'}</td>
+      <td class="actions"><button class="btn-small" data-km-edit="${k.id}">編集</button><button class="btn-danger" data-km-del="${k.id}">削除</button></td></tr>`;
+    }),
+    all.length ? '該当する科目はありません。' : `${C.fyLabel(fy)}の科目が登録されていません。年度始めに「Excelから取り込む」で科目の一覧を取り込むか、「前年度からコピー」してください。`,
+  );
+  document.getElementById('kamoku-unmatched').innerHTML = unmatched.length ? `<h3>科目一覧にない予算科目の任用（${unmatched.length}件）</h3>
+    <p class="hint">任用の「予算科目」が、この年度の科目一覧の款項目表示（またはコード）と一致しません。科目を追加するか、任用の科目を選び直してください。</p>
+    ${tableHtml(['氏名', '所属', '業務内容', '会計', '予算科目', ''], unmatched.map((a) => `<tr><td>${nameLink(a.staffId)}</td><td>${escapeHtml(a.dept)}</td><td>${escapeHtml(a.title)}</td>
+      <td>${escapeHtml(a.account)}</td><td>${escapeHtml(a.budgetCode)}</td>
+      <td class="actions"><button class="btn-small" data-km-appt="${a.id}">任用を編集</button><button class="btn-small" data-km-from="${a.id}">この科目を追加</button></td></tr>`))}` : '';
+  const root = document.getElementById('panel-kamoku');
+  const find = (id) => DATA.kamoku.find((k) => k.id === id);
+  root.querySelectorAll('[data-km-edit]').forEach((b) => (b.onclick = () => openKamokuForm(find(b.dataset.kmEdit))));
+  root.querySelectorAll('[data-km-del]').forEach((b) => (b.onclick = () => {
+    const k = find(b.dataset.kmDel);
+    const n = C.appointmentsOfKamoku(DATA, k).length;
+    if (!confirm(`科目「${kamokuLabel(k)}」を削除しますか？${n ? `\nこの科目を使っている任用が${n}件あります（任用の予算科目はそのまま残ります）。` : ''}`)) return;
+    DATA.kamoku = DATA.kamoku.filter((x) => x !== k);
+    saveData();
+  }));
+  root.querySelectorAll('[data-km-show]').forEach((b) => (b.onclick = () => {
+    document.getElementById('appoint-search').value = find(b.dataset.kmShow).display;
+    window.activateTab('appoint');
+    renderAppointments();
+  }));
+  root.querySelectorAll('[data-km-appt]').forEach((b) => (b.onclick = () => openAppointForm(DATA.appointments.find((a) => a.id === b.dataset.kmAppt))));
+  root.querySelectorAll('[data-km-from]').forEach((b) => (b.onclick = () => {
+    const a = DATA.appointments.find((x) => x.id === b.dataset.kmFrom);
+    openKamokuForm(null, { deptCode: a.deptCode, dept: a.dept, account: a.account, display: a.budgetCode });
+  }));
+  renderKamokuImport();
+}
+function openKamokuForm(k, preset = {}) {
+  const fy = currentFy();
+  const fields = C.KAMOKU_FIELDS.map(([key, label]) => ({ key, label: key === 'srcId' ? 'ID（アップロード一覧のID。なければ空欄）' : label,
+    required: key === 'display' || key === 'name', full: key === 'flag', placeholder: key === 'display' ? '例：02-01-06-115' : '' }));
+  openForm(k ? '科目を編集' : `${fyShort(fy)}年度の科目を追加`, fields, k || preset, (v) => {
+    const dup = C.kamokuOfFy(DATA, k ? k.fy : fy).find((x) => x !== k && C.normBudget(x.display) === C.normBudget(v.display) && String(x.deptCode) === String(v.deptCode) && String(x.account) === String(v.account));
+    if (dup) return '<p class="error-text">同じ所属・会計・款項目表示の科目がすでにあります。</p>';
+    if (k) Object.assign(k, v, { updatedAt: todayISO() });
+    else DATA.kamoku.push({ id: C.uid('km'), fy, ...v, source: 'manual', createdAt: todayISO() });
+    saveData();
+    showToast(k ? '科目を更新しました。' : '科目を追加しました。');
+    return undefined;
+  }, { wide: true });
+}
+/** Excelの行から取込確認を始める（科目管理タブ・Excel取込タブの両方から使う） */
+function startKamokuImport(rows, fileName) {
+  const res = C.parseKamoku(rows);
+  kamokuImport = { ...res, fy: currentFy(), fileName };
+  window.activateTab('kamoku');
+  renderKamokuImport();
+  document.getElementById('kamoku-preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function renderKamokuImport() {
+  const box = document.getElementById('kamoku-preview');
+  if (!kamokuImport) { box.innerHTML = ''; return; }
+  const ki = kamokuImport;
+  if (ki.error) {
+    box.innerHTML = `<div class="import-summary"><p class="error-text">${escapeHtml(ki.error)}</p><button class="btn-secondary" id="km-cancel">閉じる</button></div>`;
+    document.getElementById('km-cancel').onclick = () => { kamokuImport = null; renderKamokuImport(); };
+    return;
+  }
+  const baseFy = C.fiscalYearOf(todayISO());
+  const years = [...new Set([baseFy - 1, baseFy, baseFy + 1, currentFy(), ki.fy])].sort((a, b) => a - b);
+  const plan = C.importKamoku(DATA, ki.fy, ki.records, false);
+  box.innerHTML = `<div class="import-summary">
+    <h3>取込内容の確認（${escapeHtml(ki.fileName || '')}）</h3>
+    <div class="nensu-fy"><label><strong>何年度の科目として取り込むか</strong>
+      <select id="km-fy">${years.map((y) => `<option value="${y}"${y === ki.fy ? ' selected' : ''}>${C.fyLabel(y)}（${y}）${y === baseFy ? '・今年度' : y === baseFy + 1 ? '・翌年度' : ''}</option>`).join('')}</select></label></div>
+    <div><strong>見出し行：</strong>${ki.headerRow + 1}行目／<strong>結果（見込み）：</strong>新規 ${plan.add}件／更新 ${plan.update}件${ki.skipped.length ? `／取り込まない行 ${ki.skipped.length}件` : ''}</div>
+    <small class="muted">同じID（IDがなければ同じ所属・会計・款項目表示）の科目は上書きします。一覧にない科目は消しません。</small>
+    ${ki.skipped.length ? `<details><summary>取り込まない行</summary><ul>${ki.skipped.map((x) => `<li>${x.row}行目：${escapeHtml(x.reason)}</li>`).join('')}</ul></details>` : ''}
+    ${tableHtml(['行', 'ID', '所属', '所属名', '会計', '款項目表示', '款項目名', '実調部門', '定員部門', '備考'], ki.records.slice(0, 200).map((r) =>
+      `<tr><td>${r._row}</td><td>${escapeHtml(r.srcId)}</td><td>${escapeHtml(r.deptCode)}</td><td>${escapeHtml(r.dept)}</td><td>${escapeHtml(r.accountCode)} ${escapeHtml(r.account)}</td>
+      <td>${escapeHtml(r.display)}</td><td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.jicchoCode)} ${errCell(r.jicchoName)}</td><td>${escapeHtml(r.teiinCode)} ${errCell(r.teiinName)}</td><td>${escapeHtml(r.flag)}</td></tr>`), '取り込む科目がありません。')}
+    <div class="row-actions"><button class="btn-secondary" id="km-cancel">やめる</button>
+      <button class="btn-primary" id="km-run"${ki.records.length ? '' : ' disabled'}>${C.fyLabel(ki.fy)}の科目として取り込む</button></div></div>`;
+  document.getElementById('km-fy').onchange = (e) => { ki.fy = Number(e.target.value); renderKamokuImport(); };
+  document.getElementById('km-cancel').onclick = () => { kamokuImport = null; renderKamokuImport(); };
+  document.getElementById('km-run').onclick = () => {
+    const r = C.importKamoku(DATA, ki.fy, ki.records, true);
+    kamokuImport = null;
+    if (ki.fy !== currentFy()) {
+      const sel = document.getElementById('global-fy');
+      if (![...sel.options].some((o) => Number(o.value) === ki.fy)) sel.insertAdjacentHTML('beforeend', `<option value="${ki.fy}">${C.fyLabel(ki.fy)}（${ki.fy}）</option>`);
+      sel.value = String(ki.fy);
+      saveUi({ fy: sel.value });
+    }
+    saveData();
+    showToast(`${C.fyLabel(ki.fy)}の科目を取り込みました（新規${r.add}件・更新${r.update}件）。`);
+  };
+}
+function copyKamokuFromPrev() {
+  const fy = currentFy();
+  const n = C.kamokuOfFy(DATA, fy - 1).length;
+  if (!n) { alert(`${C.fyLabel(fy - 1)}の科目が登録されていません。`); return; }
+  if (!confirm(`${C.fyLabel(fy - 1)}の科目（${n}件）を${C.fyLabel(fy)}にコピーします。すでにある科目はコピーしません。よろしいですか？`)) return;
+  const added = C.copyKamoku(DATA, fy - 1, fy);
+  saveData();
+  showToast(`${added}件の科目をコピーしました。`);
+}
+function exportKamoku() {
+  const fy = currentFy();
+  const rows = [['ID', '所属', '所属名', '財務', '', '会計', '会計名', '款項目コード', '款項目表示', '款項目名', 'サブ所属', 'サブ会計', 'サブ科目', '実調部門cd', '実調部門名', '定員部門cd', '定員部門名', '備考', '登録', '任用件数']];
+  C.kamokuOfFy(DATA, fy).forEach((k) => rows.push([k.srcId, k.deptCode, k.dept, k.zaimuCode, k.zaimuName, k.accountCode, k.account, k.code, k.display, k.name,
+    k.subDept, k.subAccount, k.subKamoku, k.jicchoCode, k.jicchoName, k.teiinCode, k.teiinName, k.flag, k.source === 'manual' ? `年度途中に追加（${k.createdAt || ''}）` : '取込', C.appointmentsOfKamoku(DATA, k).length]));
+  writeWorkbook(`${C.fyLabel(fy)}科目一覧_${stamp()}.xlsx`, [{ name: '科目', rows }]);
+}
+
+/* ------------------------------------------------------------
  * 初期化
  * ------------------------------------------------------------ */
 function renderAll() {
@@ -2381,6 +2561,7 @@ function renderAll() {
   renderReappoint();
   renderRetire();
   renderYearEnd();
+  renderKamoku();
 }
 function init() {
   loadData();
@@ -2432,6 +2613,23 @@ function init() {
   document.getElementById('retire-filter').onchange = renderRetire;
   document.getElementById('btn-retire-export').onclick = exportRetire;
   document.getElementById('btn-yearend-reset').onclick = resetYearEndDates;
+  document.getElementById('kamoku-search').oninput = renderKamoku;
+  document.getElementById('btn-kamoku-add').onclick = () => openKamokuForm(null);
+  document.getElementById('btn-kamoku-copy').onclick = copyKamokuFromPrev;
+  document.getElementById('btn-kamoku-export').onclick = exportKamoku;
+  document.getElementById('kamoku-file').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const wb = await readWorkbook(file);
+      // 見出しのあるシートを探す
+      const name = wb.SheetNames.find((n) => !C.parseKamoku(sheetRows(wb.Sheets[n])).error) || wb.SheetNames[0];
+      startKamokuImport(sheetRows(wb.Sheets[name]), file.name);
+    } catch (err) {
+      alert(`ファイルを読み込めませんでした：${err.message}`);
+    }
+  };
   document.getElementById('btn-yearend-export').onclick = exportYearEnd;
 
   document.getElementById('import-file').onchange = onImportFile;

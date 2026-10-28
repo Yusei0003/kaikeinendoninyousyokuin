@@ -738,3 +738,31 @@ test('年度替わり事務：求人確認・予算議決の確認・4月の資�
   d.yearEnd[2026].notices.shikaku.hire = { s2: { 2: true } };
   assert.strictEqual(v().shikaku.tracker.done, 1);
 });
+
+test('科目：会計・款項目の一覧を年度ごとに取り込み、任用の予算科目と突き合わせる', () => {
+  const rows = [
+    ['会計・款項目 アップロード'],
+    ['ID', '所属', '所属名', '財務', '', '会計', '会計名', '款項目コード', '款項目表示', '款項目名', 'サブ所属', 'サブ会計', 'サブ科目', '実調部門cd', '実調部門名', '定員部門cd', '定員部門名', ''],
+    [9001, 1050, '架空部架空課', 1050, '架空部架空課', 1, '一般', 20106000115, '02-01-06-115', '架空課予算', 1050, 1, '02-01-06-115', 30, '総務関係', 20, '総務一般', '変・複'],
+    [9002, 2100, '架空部福祉課', 2100, '架空部福祉課', 9, '国保事業', 50102000350, '05-01-02-350', '福祉課予算', 2100, 9, '05-01-02-350', '', 'エラー', '', 'エラー', ''],
+  ];
+  const res = C.parseKamoku(rows);
+  assert.ifError(res.error);
+  assert.strictEqual(res.headerRow, 1);
+  assert.deepStrictEqual(res.records.map((r) => [r.srcId, r.deptCode, r.zaimuName, r.account, r.display, r.name, r.flag]),
+    [['9001', '1050', '架空部架空課', '一般', '02-01-06-115', '架空課予算', '変・複'], ['9002', '2100', '架空部福祉課', '国保事業', '05-01-02-350', '福祉課予算', '']]);
+  const d = baseData();
+  assert.deepStrictEqual(C.importKamoku(d, 2026, res.records), { add: 2, update: 0 });
+  assert.deepStrictEqual(C.importKamoku(d, 2026, res.records), { add: 0, update: 2 }); // 同じIDは上書き
+  assert.strictEqual(C.kamokuOfFy(d, 2025).length, 0); // 年度ごと
+  // 予算科目の表記ゆれ（全角・ハイフン）を吸収して突き合わせる
+  const a = appt({ id: 'k1', start: '2026-04-01', end: '2027-03-31', deptCode: '1050', budgetCode: '０２－０１－０６－１１５' });
+  d.appointments.push(a);
+  assert.strictEqual(C.kamokuOfAppointment(d, a).name, '架空課予算');
+  assert.strictEqual(C.appointmentsOfKamoku(d, C.kamokuOfAppointment(d, a)).length, 1);
+  assert.strictEqual(C.kamokuOfAppointment(d, { ...a, budgetCode: '99-99-99-999' }), null);
+  // 前年度からコピー（同じ科目は写さない）
+  assert.strictEqual(C.copyKamoku(d, 2026, 2027), 2);
+  assert.strictEqual(C.copyKamoku(d, 2026, 2027), 0);
+  assert.deepStrictEqual(C.normalizeData({}).kamoku, []);
+});
