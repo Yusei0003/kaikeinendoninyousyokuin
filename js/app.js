@@ -226,7 +226,7 @@ const YEARLY_SCHEDULE = [
   { month: 6, text: '雇用保険料・労働保険料の申告・支払（電子申請）' },
   { month: 7, text: '被保険者報酬月額算定基礎届・賞与支払届の提出' },
   { month: 9, text: '算定基礎届に基づく標準報酬月額の変更（人事システムの保険情報へ反映）' },
-  { month: 10, text: '雇用保険から退職手当制度への切替（4/1採用のフルタイム1年目：6月経過）' },
+  { month: 10, text: '雇用保険から退職手当制度への切替（4/1採用のフルタイム1年目：必要日数以上の月が引き続いて6月を超えた日）' },
   { month: 11, text: '任用希望調査（各課の新規需要の把握）／公募職種及び勤務条件の決定' },
   { month: 12, text: '求人申込書等の提出依頼・公募関係書類作成' },
   { month: 1, text: '再度の任用に関する通知（人事評価の結果・本人の希望による）／募集期間・公募（HP・区長文書・ハローワーク）' },
@@ -242,8 +242,8 @@ function upcomingProcedures(t, days) {
     const name = staffName(a.staffId);
     const sw = C.fullTimeSwitchDates(DATA, a, DATA.settings);
     if (sw) {
-      if (sw.taishu > t && sw.taishu <= limit && sw.taishu <= a.end) out.push({ date: sw.taishu, name, staffId: a.staffId, what: `雇用保険→退職手当の切替（フルタイム6月経過）。${C.toWarekiShort(C.switchNoticeFrom(sw.taishu))}から手続き`, basis: '市マニュアル第Ⅶ章2' });
-      if (sw.kyosai > t && sw.kyosai <= limit && sw.kyosai <= C.addDaysISO(a.end, 1)) out.push({ date: sw.kyosai, name, staffId: a.staffId, what: `共済組合（短期）→共済組合への切替（フルタイム12月経過）。${C.toWarekiShort(C.switchNoticeFrom(sw.kyosai))}から手続き`, basis: '市マニュアル第Ⅶ章1' });
+      if (sw.taishu > t && sw.taishu <= limit && sw.taishu <= a.end) out.push({ date: sw.taishu, name, staffId: a.staffId, what: `雇用保険→退職手当の切替（必要日数以上の月が6月超）。${C.toWarekiShort(C.switchNoticeFrom(sw.taishu))}から手続き`, basis: '総合事務組合 退職手当支給条例第2条' });
+      if (sw.kyosai > t && sw.kyosai <= limit && sw.kyosai <= C.addDaysISO(a.end, 1)) out.push({ date: sw.kyosai, name, staffId: a.staffId, what: `共済組合（短期）→共済組合への切替（必要日数以上の月が12月超）。${C.toWarekiShort(C.switchNoticeFrom(sw.kyosai))}から手続き`, basis: '【国】地方公務員等共済組合法' });
     }
     if (a.start >= t && a.start <= limit && !a.ukagai) out.push({ date: a.start, name, staffId: a.staffId, what: `任用伺いが未受理（${a.dept} ${a.title}）`, basis: '申送事項（3月下旬 任用起案）' });
     if (/保育士/.test(a.title || '') && String(a.hoikushiCheck || '') !== '済') out.push({ date: a.start, name, staffId: a.staffId, what: '保育士特定登録取消者管理システムの確認が未済', basis: '任用一覧の確認項目' });
@@ -549,6 +549,7 @@ function openStaffDetail(staffId) {
         <td>${escapeHtml(x.kubunText)}</td><td>${wareki(x.start)}</td><td>${x.end ? wareki(x.end) : '<span class="badge ok">継続中</span>'}</td><td>${escapeHtml(x.reason || '')}</td>
         <td>${x.continuous == null ? '—' : x.continuous ? '<span class="badge ok">切れ目なし</span>' : `<span class="badge warn">${x.gapDays}日空き（途切れ）</span>`}</td></tr>`))}
       <p class="muted">人事システムの任用から取込：${new Date(s.employmentImportedAt).toLocaleDateString('ja-JP')}</p>` : ''}
+    ${joukinSectionHtml(s)}
     <h4>経歴（新しい順）</h4>
     ${career.rows.length ? `<ol class="timeline">${timeline}</ol>` : '<p class="empty">任用の記録はありません。</p>'}
     <h4>人事評価</h4>
@@ -574,6 +575,7 @@ function openStaffDetail(staffId) {
     closeModal();
     openAppointForm(a);
   }));
+  bindJoukinSection(s);
   document.getElementById('detail-export').onclick = () => {
     const rows = [['年度', '3年周期', '勤続', '任期（自）', '任期（至）', '採用方法', '所属', '就業場所', '職名', '区分', '勤務時間/週', '給料・報酬', '変更点']];
     for (const r of career.rows) {
@@ -693,8 +695,9 @@ function judgeHtml(j) {
     <dt>社会保険（任用開始時）</dt><dd>${v(j.socialIns)} ${j.socialNote ? `<small class="warn-text">${escapeHtml(j.socialNote)}</small>` : ''} <small class="muted">第Ⅶ章1</small></dd>
     <dt>雇保／退手（任用開始時）</dt><dd>${v(j.empIns)} <small class="muted">第Ⅶ章2</small></dd>
     ${j.sw ? `<dt>フルタイム継続開始日</dt><dd>${j.sw.serviceStart}${j.sw.estimated ? '（年目から推定）' : ''}</dd>
-      <dt>雇保→退手 切替</dt><dd><strong>${j.sw.taishu}</strong> <small class="muted">6月経過</small></dd>
-      <dt>健保→共済 切替</dt><dd><strong>${j.sw.kyosai}</strong> <small class="muted">12月経過</small></dd>` : ''}
+      <dt>雇保→退手 切替</dt><dd><strong>${j.sw.taishu}</strong> <small class="muted">必要日数以上の月が引き続いて${DATA.settings.taishuMonths}月を超えた日（総合事務組合 退職手当支給条例第2条）</small></dd>
+      <dt>健保→共済 切替</dt><dd><strong>${j.sw.kyosai}</strong> <small class="muted">必要日数以上の月が引き続き${DATA.settings.kyosaiMonths}月を超えた日（【国】地方公務員等共済組合法）</small></dd>
+      <dt>数え方</dt><dd><small>${escapeHtml(switchExplain(j.sw))}</small></dd>` : ''}
     <dt>健康診断・ストレスチェック</dt><dd>${j.health ? '<strong>対象</strong>' : '対象外'} <small class="muted">第Ⅶ章4（任用1年かつ週29時間以上）</small></dd>
     <dt>勤続（継続勤務）</dt><dd>${j.service ? `${j.service.date}から${j.service.manual ? '（入力値）' : j.service.source === 'jinji' ? '（人事システムの任用から）' : j.service.source === 'roster' ? '（職員名簿の採用日から）' : j.service.estimated ? '（年目から推定）' : ''}・継続勤務年数 ${j.serviceYears === 0 ? '任用の日' : `${j.serviceYears}年`}` : '—'} <small class="muted">公募をまたいでも切れ目がなければ通算（年休・退手・共済に使用）</small></dd>
     <dt>3年周期の年目（公募の判断）</dt><dd>${j.year ? `${j.year}年目` : '—'}${j.publicFy ? `・<strong>${C.toWarekiShort(C.fiscalYearStart(j.publicFy)).replace(/\.1$/, '')}に公募</strong>` : ''} <small class="muted">第Ⅷ章2（公募で1年目に戻る）</small></dd>
@@ -1621,6 +1624,30 @@ function downloadImportTemplate() {
  * ------------------------------------------------------------ */
 const LAWS = [
   {
+    key: 'kyosai_kumiaiin',
+    level: '国',
+    title: '地方公務員等共済組合法（組合員の資格：常勤的非常勤職員）',
+    uses: [
+      '常勤の勤務時間以上勤務した日が必要日数（n≧20は18日、n＜20は18−(20−n)日）以上ある月が引き続き12月を超えた者は組合員（長期・短期・福祉） → フルタイムの「共済（短期）→共済」の切替日',
+      '出典：共済組合の事務手引き p.8「四、組合員の資格」（紙の手引き）',
+      '未確定：休日の範囲、勤務開始月の扱い、年末年始の扱い（今は勤務開始月は開始日から月末までの勤務を要する日が必要日数以上なら数える）',
+    ],
+    status: '原文未確認：紙の手引きの要約をもとに実装。条文（項番号・文言）は原文で確認してください。',
+  },
+  {
+    key: 'sougou_taishoku_2',
+    level: '一部事務組合',
+    title: '岩手県市町村総合事務組合 市町村職員退職手当支給条例 第2条（支給対象職員）',
+    uses: [
+      '常勤の勤務時間で勤務した日が職員みなし日数以上ある月が引き続いて6月を超える非常勤職員は支給対象 → フルタイムの「雇用保険→退職手当」の切替日',
+      '職員みなし日数は令和5年1月1日以降の月に適用（それより前は一律18日） → 「設定」で変更可',
+      'その月の勤務日数がみなし日数に満たないことが客観的に明らかになった日をもって退職扱い → 「状況・手続き」の月ごとの判定',
+      '上位根拠：【国】地方自治法第204条第2項・第3項',
+      '出典：総合事務組合の退職手当事務手引き「2 支給対象職員（条例第2条）」（紙の手引き）',
+    ],
+    status: '原文未確認：紙の手引きの要約をもとに実装。条文（項番号・文言）は原文で確認してください。※市・県の条例ではなく一部事務組合の条例です。',
+  },
+  {
     key: 'chikouhou_22_2',
     level: '国',
     title: '地方公務員法 第22条の2（会計年度任用職員の採用の方法等）',
@@ -1675,7 +1702,7 @@ const LAWS = [
       '第Ⅲ章3：支給日（フル・月額パート＝当月21日、日額・時間額パート＝翌月21日） → 支給日の点検',
       '第Ⅳ章10：期末手当＝任用期間6か月以上かつ週15時間30分以上 → 期末手当の判定',
       '第Ⅴ章1：年次休暇（6月以上の任期の職員、週の勤務日数と継続勤務年数による表） → 年休の判定',
-      '第Ⅶ章1・2：社会保険（週29時間以上＝共済短期＋厚生年金、フルは12月経過で共済組合）、雇用保険（週20時間以上かつ31日以上、フルは6月経過で退職手当） → 保険の判定・切替時期',
+      '第Ⅶ章1・2：社会保険（週29時間以上＝共済短期＋厚生年金、フルは12月経過で共済組合）、雇用保険（週20時間以上かつ31日以上、フルは6月経過で退職手当） → 保険の判定（切替日の数え方は【国】地方公務員等共済組合法・総合事務組合 退職手当支給条例第2条による）',
       '第Ⅶ章4：健康診断・ストレスチェック（任用1年かつ週29時間以上） → 判定表示',
       '第Ⅶ章5：人事評価（任期・フル/パートにかかわらず対象。任用の優先権は与えない） → 人事評価タブ',
       '第Ⅷ章1：選考・任用のスケジュール、合格者の提出書類 → 採用試験タブ・ホームの年間スケジュール',
@@ -1703,7 +1730,7 @@ function renderLaws() {
     const saved = DATA.legalTexts[l.key] || {};
     const verified = !!(saved.text && saved.checkedAt);
     return `<div class="law-item">
-      <div class="law-head"><span class="level level-${l.level === '国' ? 'national' : 'city'}">${l.level}</span><h3>${escapeHtml(l.title)}</h3>
+      <div class="law-head"><span class="level level-${l.level === '国' ? 'national' : l.level === '一部事務組合' ? 'union' : 'city'}">${l.level}</span><h3>${escapeHtml(l.title)}</h3>
         ${l.docStatus ? `<span class="badge ok">${escapeHtml(l.docStatus)}</span>` : verified ? `<span class="badge ok">原文確認済み（${escapeHtml(saved.checkedAt)}）</span>` : '<span class="badge warn">原文未確認</span>'}</div>
       ${verified || l.docStatus ? '' : `<p class="muted">${escapeHtml(l.status)}</p>`}
       ${l.docStatus ? '<p class="muted">金額（基礎額・上限など）はマニュアル作成時点（R5.4.1）の値のため、システムには組み込まず任用ごとに入力します。</p>' : ''}
@@ -1750,8 +1777,10 @@ function renderSettings() {
     <label>期末手当：週勤務時間（時間以上）<input type="number" step="0.25" id="set-bonusMinWeeklyHours" value="${escapeHtml(s.bonusMinWeeklyHours)}"><small>市マニュアル第Ⅳ章10：15時間30分</small></label>
     <label>社会保険（共済短期）：週時間（以上）<input type="number" step="0.25" id="set-socialInsHours" value="${escapeHtml(s.socialInsHours)}"><small>市マニュアル第Ⅶ章1</small></label>
     <label>雇用保険：週時間（以上）<input type="number" step="0.25" id="set-empInsHours" value="${escapeHtml(s.empInsHours)}"><small>市マニュアル第Ⅶ章2</small></label>
-    <label>フル：退職手当への切替（月経過）<input type="number" id="set-taishuMonths" value="${escapeHtml(s.taishuMonths)}"><small>市マニュアル第Ⅶ章2：6月</small></label>
-    <label>フル：共済組合への切替（月経過）<input type="number" id="set-kyosaiMonths" value="${escapeHtml(s.kyosaiMonths)}"><small>市マニュアル第Ⅶ章1：12月</small></label>
+    <label>フル：退職手当への切替（必要日数以上の月が引き続いて何月を超えたら）<input type="number" id="set-taishuMonths" value="${escapeHtml(s.taishuMonths)}"><small>総合事務組合 退職手当支給条例第2条：6月</small></label>
+    <label>フル：共済組合への切替（必要日数以上の月が引き続き何月を超えたら）<input type="number" id="set-kyosaiMonths" value="${escapeHtml(s.kyosaiMonths)}"><small>【国】地方公務員等共済組合法（事務手引き p.8）：12月</small></label>
+    <label>職員みなし日数を適用する最初の月<input type="month" id="set-minashiFrom" value="${escapeHtml(s.minashiFrom || '2023-01')}"><small>n＜20の月は18−(20−n)日。それより前の月は一律18日（令和5年1月から）</small></label>
+    <label class="checkbox-label"><input type="checkbox" id="set-yearEndExcluded"${s.yearEndExcluded ? ' checked' : ''}> 年末年始（12/29〜1/3）を勤務を要しない日に含める <small>資料に記載がないため既定は含めない</small></label>
     <label>健康診断・ストレスチェック：週時間（以上）<input type="number" step="0.25" id="set-healthCheckHours" value="${escapeHtml(s.healthCheckHours)}"><small>市マニュアル第Ⅶ章4</small></label>
     <label>条件付採用期間（月）<input type="number" min="0" id="set-probationMonths" value="${escapeHtml(s.probationMonths)}">
       <small>原文（【国】地方公務員法第22条の2）で確認のうえ設定。0で非表示。</small></label>
@@ -1782,6 +1811,8 @@ function saveSettings() {
     empInsHours: num('set-empInsHours') ?? DATA.settings.empInsHours,
     taishuMonths: num('set-taishuMonths') ?? DATA.settings.taishuMonths,
     kyosaiMonths: num('set-kyosaiMonths') ?? DATA.settings.kyosaiMonths,
+    minashiFrom: document.getElementById('set-minashiFrom').value || DATA.settings.minashiFrom,
+    yearEndExcluded: document.getElementById('set-yearEndExcluded').checked,
     healthCheckHours: num('set-healthCheckHours') ?? DATA.settings.healthCheckHours,
     probationMonths: num('set-probationMonths') || 0,
     expiryAlertDays: num('set-expiryAlertDays') || 60,
@@ -2585,6 +2616,103 @@ function exportKamoku() {
 }
 
 /* ------------------------------------------------------------
+ * 常勤的非常勤職員の判定（月ごとの勤務日数）
+ * ------------------------------------------------------------ */
+function ymLabel(ym) { const [y, m] = String(ym).split('-').map(Number); return `${C.toWarekiShort(`${y}-${String(m).padStart(2, '0')}-01`).replace(/\.1$/, '')}`; }
+/** 切替日の数え方の説明（勤務開始月を数えたか・数え直したか） */
+function switchExplain(sw) {
+  if (!sw) return '';
+  const first = sw.firstCounted
+    ? `勤務開始月（${ymLabel(sw.first)}）は勤務を要する日${sw.firstWorked}日≧必要${sw.firstRequired}日のため数える`
+    : `勤務開始月（${ymLabel(sw.first)}）は勤務を要する日${sw.firstWorked}日＜必要${sw.firstRequired}日のため数えず、翌月から数える`;
+  const restart = sw.restartAfter ? `。${ymLabel(sw.restartAfter)}は要件を満たさなかったため、${ymLabel(sw.countFrom)}から数え直し` : '';
+  return `${first}${restart}`;
+}
+/** 職員の「要件を満たさなかった月」を記録する */
+function openUnmetForm(staffId, preset = {}) {
+  const s = staffById(staffId);
+  openForm(`${s.name}：要件を満たさなかった月を記録`, [
+    { key: 'month', label: '月', type: 'month', required: true },
+    { key: 'note', label: 'メモ（欠勤の理由・退職扱い日など）', full: true },
+  ], preset, (v) => {
+    s.unmetMonths = (s.unmetMonths || []).filter((u) => (u.month || u) !== v.month).concat([{ month: v.month, note: v.note, recordedAt: todayISO() }])
+      .sort((a, b) => a.month.localeCompare(b.month));
+    saveData();
+    showToast('記録しました。切替日を計算し直しました。');
+    setTimeout(() => openStaffDetail(staffId));
+    return undefined;
+  });
+}
+/** 経歴画面の「常勤的非常勤の判定」欄 */
+function joukinSectionHtml(s) {
+  const full = DATA.appointments.filter((a) => a.staffId === s.id && a.status !== 'canceled' && a.type === 'full').sort((a, b) => b.start.localeCompare(a.start))[0];
+  const unmet = s.unmetMonths || [];
+  if (!full && !unmet.length) return '';
+  const sw = full ? C.fullTimeSwitchDates(DATA, full, DATA.settings) : null;
+  return `<h4>常勤的非常勤の判定（フルタイム）</h4>
+    ${sw ? `<dl class="kv compact">
+      <dt>フルタイム継続開始日</dt><dd>${wareki(sw.serviceStart)}${sw.estimated ? '（年目から推定）' : ''}</dd>
+      <dt>数え方</dt><dd>${escapeHtml(switchExplain(sw))}</dd>
+      <dt>雇用保険→退職手当</dt><dd><strong>${wareki(sw.taishu)}</strong> <small class="muted">必要日数以上の月が引き続いて${DATA.settings.taishuMonths}月を超えた日</small></dd>
+      <dt>共済（短期）→共済</dt><dd><strong>${wareki(sw.kyosai)}</strong> <small class="muted">必要日数以上の月が引き続き${DATA.settings.kyosaiMonths}月を超えた日</small></dd>
+    </dl>` : ''}
+    <p class="muted">勤務を要する日（土日・祝日を除く）はすべて常勤の勤務時間で勤務したものとして計算します。欠勤などで必要日数に届かなかった月は記録してください（その翌月から数え直します）。</p>
+    ${tableHtml(['要件を満たさなかった月', 'メモ', ''], unmet.map((u) => `<tr><td>${ymLabel(u.month || u)}</td><td>${escapeHtml(u.note || '')}</td>
+      <td class="actions"><button class="btn-danger" data-unmet-del="${escapeHtml(u.month || u)}">削除</button></td></tr>`), '記録はありません。')}
+    <button class="btn-secondary" id="btn-unmet-add">要件を満たさなかった月を記録</button>`;
+}
+function bindJoukinSection(s) {
+  const add = document.getElementById('btn-unmet-add');
+  if (add) add.onclick = () => openUnmetForm(s.id);
+  document.querySelectorAll('[data-unmet-del]').forEach((b) => (b.onclick = () => {
+    if (!confirm('この記録を削除しますか？')) return;
+    s.unmetMonths = (s.unmetMonths || []).filter((u) => (u.month || u) !== b.dataset.unmetDel);
+    saveData();
+    openStaffDetail(s.id);
+  }));
+}
+/** 状況・手続きタブの「月ごとの勤務日数の判定」 */
+function renderJoukinCalc() {
+  const box = document.getElementById('joukin-calc');
+  if (!box.dataset.ready) {
+    const now = todayISO().slice(0, 7);
+    box.innerHTML = `<div class="grid-form joukin-form">
+        <label>月<input type="month" id="jk-month" value="${now}"></label>
+        <label class="full">勤務しなかった日（常勤の勤務時間に満たなかった日）<input type="text" id="jk-absent" placeholder="日にちをカンマ区切りで（例：3,7,17）"></label>
+        <label>職員（記録する場合）<select id="jk-staff">${staffOptions().map(([v, l]) => `<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join('')}</select></label>
+      </div><div id="jk-result"></div>`;
+    box.dataset.ready = '1';
+    ['jk-month', 'jk-absent'].forEach((id) => document.getElementById(id).addEventListener('input', renderJoukinCalc));
+  }
+  const ym = document.getElementById('jk-month').value;
+  if (!/^\d{4}-\d{2}$/.test(ym)) { document.getElementById('jk-result').innerHTML = ''; return; }
+  const [y, m] = ym.split('-').map(Number);
+  const s = DATA.settings;
+  const days = C.workableDays(y, m, s);
+  const req = C.requiredDays(days.length, y, m, s);
+  const absent = [...new Set(document.getElementById('jk-absent').value.normalize('NFKC').split(/[^\d]+/).filter(Boolean).map(Number))]
+    .filter((d) => d >= 1 && d <= 31).map((d) => `${ym}-${String(d).padStart(2, '0')}`);
+  const absentWork = absent.filter((d) => days.includes(d));
+  const worked = days.length - absentWork.length;
+  const ret = C.retirementDate(y, m, absent, s);
+  const holidays = [...C.holidaysOf(y)].filter((d) => d.startsWith(ym)).map((d) => Number(d.slice(8)));
+  const minashi = days.length < 20 && ym >= String(s.minashiFrom || '2023-01');
+  document.getElementById('jk-result').innerHTML = `<dl class="kv compact">
+      <dt>勤務を要する日数（n）</dt><dd><strong>${days.length}日</strong> <small class="muted">土日${holidays.length ? `・祝日（${holidays.join('・')}日）` : ''}${s.yearEndExcluded ? '・年末年始' : ''}を除く</small></dd>
+      <dt>必要日数</dt><dd><strong>${req}日</strong> <small class="muted">${days.length >= 20 ? 'n≧20のため18日' : minashi ? `職員みなし日数：18−(20−${days.length})` : '令和5年1月より前の月のため18日'}</small></dd>
+      <dt>勤務した日数</dt><dd><strong>${worked}日</strong>${absentWork.length ? ` <small class="muted">（勤務しなかった日：${absentWork.map((d) => Number(d.slice(8))).join('・')}日）</small>` : ''}</dd>
+      <dt>判定</dt><dd>${ret ? `<span class="badge st-err">要件を満たさない</span> <strong>${C.formatDateJa(ret)}</strong>に勤務日数が必要日数に満たないことが明らかになる（退職手当ではこの日をもって退職扱い）` : '<span class="badge st-ok">要件を満たす</span>'}</dd>
+    </dl>
+    ${ret ? '<button class="btn-secondary" id="jk-record">選んだ職員のこの月を「要件を満たさなかった月」として記録</button>' : ''}`;
+  const rec = document.getElementById('jk-record');
+  if (rec) rec.onclick = () => {
+    const sid = document.getElementById('jk-staff').value;
+    if (!sid) { alert('職員を選んでください。'); return; }
+    openUnmetForm(sid, { month: ym, note: `退職扱い日 ${C.formatDateJa(ret)}（勤務しなかった日：${absentWork.map((d) => Number(d.slice(8))).join('・')}日）` });
+  };
+}
+
+/* ------------------------------------------------------------
  * 初期化
  * ------------------------------------------------------------ */
 function renderAll() {
@@ -2603,6 +2731,7 @@ function renderAll() {
   renderRetire();
   renderYearEnd();
   renderKamoku();
+  renderJoukinCalc();
 }
 function init() {
   loadData();

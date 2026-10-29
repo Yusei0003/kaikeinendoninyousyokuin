@@ -626,3 +626,6 @@ td.kamoku-cell { white-space: nowrap; font-size: 12px; }
 .switch-name small { font-weight: 400; color: var(--muted); }
 .switch-what .arrow { color: #b91c1c; font-weight: 800; margin: 0 4px; }
 @media (max-width: 900px) { .switch-list li { grid-template-columns: 1fr; gap: 4px; } }
+
+.level-union { background: #b45309; }
+.joukin-form { max-width: 760px; }

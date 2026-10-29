@@ -45,9 +45,15 @@
     socialInsHours: 29,
     // 雇用保険（市マニュアル第Ⅶ章2：週20時間以上かつ31日以上の雇用見込み）
     empInsHours: 20,
-    // フルタイムの切替時期（市マニュアル第Ⅶ章1・2：退職手当は6月超、共済組合は12月超）
+    // フルタイムの切替時期：必要日数以上勤務した月が引き続きこの月数を超えたとき
+    // 退職手当は6月超（岩手県市町村総合事務組合 市町村職員退職手当支給条例第2条）、
+    // 共済組合は12月超（【国】地方公務員等共済組合法。共済組合の事務手引き p.8）
     taishuMonths: 6,
     kyosaiMonths: 12,
+    // 職員みなし日数（n＜20の月は18−(20−n)日）を適用する最初の月。それより前の月は一律18日
+    minashiFrom: '2023-01',
+    // 年末年始（12/29〜1/3）を勤務を要しない日に含めるか（資料に記載がないため既定は含めない）
+    yearEndExcluded: false,
     // 健康診断・ストレスチェック（市マニュアル第Ⅶ章4：任用1年かつ週29時間以上）
     healthCheckHours: 29,
     // 年休：週4日以内でも週この時間以上なら「5日以上」の区分（年次休暇の規定のただし書）
@@ -465,15 +471,142 @@
     if (appt.type !== 'full') return null;
     return serviceStartOf(data, appt, true);
   }
-  /** フルタイムの雇用保険→退職手当、健保（共済短期）→共済組合の切替時期（市マニュアル第Ⅶ章1・2） */
+  /* ------------------------------------------------------------
+   * 常勤的非常勤職員の判定（共済組合員資格・退職手当）
+   * 月ごとに「勤務を要する日数 n」（土日・祝日を除く）から必要日数（みなし日数）を求め、
+   * 常勤の勤務時間以上勤務した日が必要日数以上ある月が引き続き何か月あるかで判定する。
+   *   A 共済組合員資格：【国】地方公務員等共済組合法（共済組合の事務手引き p.8）… 引き続き12月を超えた者
+   *   B 退職手当：岩手県市町村総合事務組合 市町村職員退職手当支給条例第2条 … 引き続いて6月を超える者
+   * ------------------------------------------------------------ */
+  function nthMonday(y, m, nth) {
+    const first = new Date(y, m - 1, 1).getDay();
+    return toISO(new Date(y, m - 1, 1 + ((8 - first) % 7) + 7 * (nth - 1)));
+  }
+  function shubunDay(y) {
+    return Math.floor(23.2488 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4));
+  }
+  const holidayCache = {};
+  /** 国民の祝日・振替休日・国民の休日（その年の分）。特例の年（2020・2021年の移動など）は扱わない */
+  function holidaysOf(y) {
+    if (holidayCache[y]) return holidayCache[y];
+    const p = (m, d) => toISO(new Date(y, m - 1, d));
+    const base = [p(1, 1), nthMonday(y, 1, 2), p(2, 11), p(3, shunbunDay(y)), p(4, 29), p(5, 3), p(5, 4), p(5, 5),
+      nthMonday(y, 7, 3), p(8, 11), nthMonday(y, 9, 3), p(9, shubunDay(y)), nthMonday(y, 10, 2), p(11, 3), p(11, 23)];
+    if (y >= 2020) base.push(p(2, 23));
+    else if (y <= 2018) base.push(p(12, 23));
+    const set = new Set(base);
+    // 振替休日：日曜の祝日の後の最初の平日（祝日でない日）
+    for (const h of base) {
+      if (parseISO(h).getDay() !== 0) continue;
+      let n = addDaysISO(h, 1);
+      while (set.has(n)) n = addDaysISO(n, 1);
+      set.add(n);
+    }
+    // 国民の休日：前日と翌日が祝日の平日
+    for (const h of [...set]) {
+      const mid = addDaysISO(h, 1);
+      if (!set.has(mid) && set.has(addDaysISO(h, 2)) && parseISO(mid).getDay() !== 0) set.add(mid);
+    }
+    holidayCache[y] = set;
+    return set;
+  }
+  function isHoliday(iso) { return holidaysOf(parseISO(iso).getFullYear()).has(iso); }
+  /** 勤務を要する日（土日・祝日を除く。設定により年末年始12/29〜1/3も除く） */
+  function isWorkableDay(iso, settings = DEFAULT_SETTINGS) {
+    const d = parseISO(iso);
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6 || isHoliday(iso)) return false;
+    if (settings.yearEndExcluded) {
+      const m = d.getMonth() + 1;
+      const day = d.getDate();
+      if ((m === 12 && day >= 29) || (m === 1 && day <= 3)) return false;
+    }
+    return true;
+  }
+  /** その月の勤務を要する日（fromISO 以降に限ることもできる） */
+  function workableDays(y, m, settings, fromISO) {
+    const out = [];
+    for (let d = new Date(y, m - 1, 1); d.getMonth() === m - 1; d.setDate(d.getDate() + 1)) {
+      const iso = toISO(d);
+      if ((!fromISO || iso >= fromISO) && isWorkableDay(iso, settings)) out.push(iso);
+    }
+    return out;
+  }
+  /**
+   * 必要日数（退職手当では「職員みなし日数」）：n≧20なら18日、n＜20なら18−(20−n)。
+   * みなし日数は令和5年1月1日以降の月に適用し、それより前の月は一律18日。
+   */
+  function requiredDays(n, y, m, settings = DEFAULT_SETTINGS) {
+    const from = String(settings.minashiFrom || '2023-01').slice(0, 7);
+    const ym = `${y}-${String(m).padStart(2, '0')}`;
+    if (n >= 20 || ym < from) return 18;
+    return 18 - (20 - n);
+  }
+  /** 月の判定：勤務を要する日数・必要日数 */
+  function monthRequirement(y, m, settings) {
+    const n = workableDays(y, m, settings).length;
+    return { n, required: requiredDays(n, y, m, settings) };
+  }
+  /**
+   * 退職扱いの日：その月の勤務日数が必要日数に満たないことが客観的に明らかになった日。
+   * absent：勤務しなかった（常勤の勤務時間に満たなかった）日のISO日付。満たせる場合は null。
+   */
+  function retirementDate(y, m, absent, settings) {
+    const days = workableDays(y, m, settings);
+    const req = requiredDays(days.length, y, m, settings);
+    const off = new Set(absent || []);
+    let done = 0;
+    for (let i = 0; i < days.length; i++) {
+      if (!off.has(days[i])) done++;
+      if (done + (days.length - (i + 1)) < req) return days[i];
+    }
+    return null;
+  }
+  function ymAdd(ym, k) {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 1 + k, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  /**
+   * 連続の起算月：勤務開始月は、開始日から月末までの勤務を要する日数が必要日数以上なら数え、
+   * 足りなければ翌月から数える（勤務を要する日はすべて常勤の勤務時間で勤務したものとみなす）。
+   * 職員台帳の「要件を満たさなかった月」があれば、その翌月から数え直す。
+   */
+  function qualifyingStart(data, appt, startISO, settings) {
+    const d = parseISO(startISO);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const { n, required } = monthRequirement(y, m, settings);
+    const worked = workableDays(y, m, settings, startISO).length;
+    const first = `${y}-${String(m).padStart(2, '0')}`;
+    const counted = worked >= required;
+    let ym = counted ? first : ymAdd(first, 1);
+    const staff = (data.staff || []).find((s) => s.id === appt.staffId) || {};
+    const unmet = (staff.unmetMonths || []).map((u) => String(u.month || u).slice(0, 7)).filter((u) => u >= ym).sort();
+    const restart = unmet.length ? unmet[unmet.length - 1] : '';
+    if (restart) ym = ymAdd(restart, 1);
+    return { first, firstCounted: counted, firstWorked: worked, firstN: n, firstRequired: required, countFrom: ym, restartAfter: restart };
+  }
+  /** 引き続きN月を超えた日：起算月からN月の翌月1日 */
+  function exceedDate(countFrom, months) {
+    return `${ymAdd(countFrom, Number(months))}-01`;
+  }
+
+  /**
+   * フルタイムの雇用保険→退職手当、共済組合（短期）→共済組合の切替日。
+   * 必要日数以上勤務した月が引き続き6月（退手）・12月（共済）を超えた日＝起算月から6月・12月の翌月1日。
+   * 例：R8.4.1採用 → 退手R8.10.1・共済R9.4.1。R8.1.15採用（1月は勤務日が足りない）→ 2月から数えて退手R8.8.1・共済R9.2.1。
+   */
   function fullTimeSwitchDates(data, appt, settings) {
     const ss = fullTimeServiceStart(data, appt, settings);
     if (!ss) return null;
+    const q = qualifyingStart(data, appt, ss.date, settings);
     return {
       serviceStart: ss.date,
       estimated: ss.estimated,
-      taishu: addMonthsISO(ss.date, Number(settings.taishuMonths)),
-      kyosai: addMonthsISO(ss.date, Number(settings.kyosaiMonths)),
+      ...q,
+      taishu: exceedDate(q.countFrom, settings.taishuMonths),
+      kyosai: exceedDate(q.countFrom, settings.kyosaiMonths),
     };
   }
   /** 切替の手続きを始める日：切替日の前月10日（例：7/1切替 → 6/10から） */
@@ -482,8 +615,8 @@
     return toISO(new Date(d.getFullYear(), d.getMonth() - 1, 10));
   }
   const SWITCH_LABEL = {
-    kyosai: { before: '共済（短期）', after: '共済', basis: '市マニュアル第Ⅶ章1（フルタイム12月経過）' },
-    taishu: { before: '雇用保険', after: '退職手当', basis: '市マニュアル第Ⅶ章2（フルタイム6月経過）' },
+    kyosai: { before: '共済（短期）', after: '共済', basis: '【国】地方公務員等共済組合法（必要日数以上の月が引き続き12月を超えた日）' },
+    taishu: { before: '雇用保険', after: '退職手当', basis: '【一部事務組合】市町村職員退職手当支給条例第2条（必要日数以上の月が引き続いて6月を超えた日）' },
   };
   /**
    * 手続きを始める時期に来ている切替（共済（短期）→共済、雇用保険→退手）。
@@ -2031,6 +2164,7 @@
     emptyData, normalizeData,
     appointmentsOfStaff, probationEnd, consecutiveReappointCount, yearInServiceOf, publicRecruitFy, validateAppointment, validateRenewal,
     kubunOf, applyKubun, hoursOf, termMonths, calcPay, expectedPayDay, bonusEligibility, fullTimeServiceStart,
+    holidaysOf, isHoliday, isWorkableDay, workableDays, requiredDays, monthRequirement, retirementDate, qualifyingStart, exceedDate,
     fullTimeSwitchDates, switchNoticeFrom, switchAlerts, SWITCH_LABEL, suggestSocialIns, suggestEmpIns, healthCheckRequired, serviceStartOf, continuousServiceYears, annualLeaveDays, annualLeaveInfo, LEAVE_GRANT_LABEL,
     parsePeriod, toWarekiShort, parseNinyoIchiran, ninyoIchiranRows,
     parseMeibo, parseMeiboGender, isMeiboTarget, findStaffForMeibo, hasAppointmentOn,

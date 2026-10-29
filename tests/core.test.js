@@ -804,3 +804,48 @@ test('切替の手続き：共済（短期）→共済、雇用保険→退手�
   d.appointments.push(appt({ id: 'f3', type: 'full', payType: 'monthly', weeklyHours: 38.75, start: '2026-07-01', end: '2027-03-31', empIns: '退手' }));
   assert.strictEqual(C.switchAlerts(d, '2026-07-05', d.settings).length, 0);
 });
+
+test('常勤的非常勤：勤務を要する日数と必要日数（みなし日数）、退職扱いの日', () => {
+  const S = C.DEFAULT_SETTINGS;
+  // 祝日・振替休日・国民の休日
+  assert.ok(C.isHoliday('2026-05-06')); // 憲法記念日（日）の振替
+  assert.ok(C.isHoliday('2026-09-22')); // 敬老の日と秋分の日にはさまれた国民の休日
+  assert.ok(!C.isHoliday('2026-09-24'));
+  // 手引きの例：令和7年2月（1日土曜、11日・23日・24日が祝日・振替休日）→ n=18、必要16日
+  assert.deepStrictEqual(C.monthRequirement(2025, 2, S), { n: 18, required: 16 });
+  assert.strictEqual(C.retirementDate(2025, 2, ['2025-02-03', '2025-02-07', '2025-02-17'], S), '2025-02-17');
+  assert.strictEqual(C.retirementDate(2025, 2, ['2025-02-03', '2025-02-07'], S), null); // 欠勤2日までは満たす
+  // n≧20の月は18日
+  assert.strictEqual(C.monthRequirement(2026, 4, S).n >= 20, true);
+  assert.strictEqual(C.monthRequirement(2026, 4, S).required, 18);
+  // 令和4年12月以前の月は n＜20 でも18日
+  const dec22 = C.monthRequirement(2022, 12, S);
+  assert.ok(dec22.n >= 18);
+  assert.strictEqual(C.requiredDays(18, 2022, 12, S), 18);
+  assert.strictEqual(C.requiredDays(18, 2023, 1, S), 16);
+  // 年末年始を勤務を要しない日に含める設定
+  assert.strictEqual(C.workableDays(2026, 12, { ...S, yearEndExcluded: true }).length, C.workableDays(2026, 12, S).length - 3); // 12/29〜31（火〜木）
+});
+
+test('常勤的非常勤：月途中の採用と、要件を満たさなかった月の数え直し', () => {
+  const d = baseData();
+  const full = (o) => appt({ type: 'full', payType: 'monthly', weeklyHours: 38.75, ...o });
+  // 4/1採用：4月から数える → 退手10/1、共済翌4/1
+  d.appointments.push(full({ id: 'a', start: '2026-04-01', end: '2027-03-31' }));
+  let sw = C.fullTimeSwitchDates(d, d.appointments[0], d.settings);
+  assert.deepStrictEqual([sw.firstCounted, sw.taishu, sw.kyosai], [true, '2026-10-01', '2027-04-01']);
+  // 1/15採用：1月は勤務を要する日12日＜必要18日 → 2月から数える
+  const d2 = baseData();
+  d2.appointments.push(full({ id: 'b', start: '2026-01-15', end: '2026-03-31' }));
+  sw = C.fullTimeSwitchDates(d2, d2.appointments[0], d2.settings);
+  assert.deepStrictEqual([sw.firstCounted, sw.firstWorked, sw.firstRequired, sw.taishu, sw.kyosai], [false, 12, 18, '2026-08-01', '2027-02-01']);
+  // 1/5採用：1/5〜1/30の勤務を要する日18日≧必要18日 → 1月から数える
+  const d3 = baseData();
+  d3.appointments.push(full({ id: 'c', start: '2026-01-05', end: '2026-03-31' }));
+  sw = C.fullTimeSwitchDates(d3, d3.appointments[0], d3.settings);
+  assert.deepStrictEqual([sw.firstCounted, sw.taishu], [true, '2026-07-01']);
+  // 要件を満たさなかった月（R8.6）を記録 → R8.7から数え直し
+  d.staff[0].unmetMonths = [{ month: '2026-06' }];
+  sw = C.fullTimeSwitchDates(d, d.appointments[0], d.settings);
+  assert.deepStrictEqual([sw.restartAfter, sw.countFrom, sw.taishu, sw.kyosai], ['2026-06', '2026-07', '2027-01-01', '2027-07-01']);
+});
